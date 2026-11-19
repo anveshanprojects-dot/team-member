@@ -186,6 +186,7 @@ function App() {
   const [pinnedConversationIds, setPinnedConversationIds] = useState([])
   const [activeId, setActiveId] = useState(null)
   const [messages, setMessages] = useState([])
+  const [messagesLoading, setMessagesLoading] = useState(false)
   const [hasOlderMessages, setHasOlderMessages] = useState(false)
   const [loadingOlderMessages, setLoadingOlderMessages] = useState(false)
   const [activeStatus, setActiveStatus] = useState(null)
@@ -211,6 +212,8 @@ function App() {
   const [toast, setToast] = useState('')
   const [busy, setBusy] = useState(false)
   const [notificationsEnabled, setNotificationsEnabled] = useState(localStorage.getItem('chatter-notifications') === 'true')
+  const [notificationSoundEnabled, setNotificationSoundEnabled] = useState(localStorage.getItem('chatter-notification-sound') === 'true')
+  const [connectionStatus, setConnectionStatus] = useState('connecting')
   const [theme, setTheme] = useState(localStorage.getItem('chatter-theme') || 'light')
   const [typingUsers, setTypingUsers] = useState({})
   const bottomRef = useRef(null)
@@ -223,14 +226,22 @@ function App() {
   const streamRef = useRef(null)
   const onlineUserIds = useRef(new Set())
   const notificationsEnabledRef = useRef(notificationsEnabled)
+  const notificationSoundEnabledRef = useRef(notificationSoundEnabled)
+  const notificationIdsRef = useRef(new Set())
+  const audioContextRef = useRef(null)
 
   activeIdRef.current = activeId
   messagesRef.current = messages
   useEffect(() => { notificationsEnabledRef.current = notificationsEnabled }, [notificationsEnabled])
+  useEffect(() => { notificationSoundEnabledRef.current = notificationSoundEnabled }, [notificationSoundEnabled])
 
   const activeConversation = conversations.find((conversation) => conversation.id === activeId)
   const activeMember = activeConversation?.members?.find((member) => member.id !== session?.user?.id)
   const latestMessageId = messages.at(-1)?.id
+  const firstUnreadMessageId = messages.find((message) =>
+    message.sender_id !== session?.user?.id &&
+    !message.message_receipts?.some((receipt) => receipt.user_id === session?.user?.id && receipt.read_at)
+  )?.id
   const activeTitle = activeConversation?.is_group ? activeConversation.name : activeMember?.full_name || activeMember?.username || 'Conversation'
   const filteredConversations = useMemo(() => conversations.filter((conversation) => {
     const person = conversation.members?.find((member) => member.id !== session?.user?.id)
@@ -243,6 +254,44 @@ function App() {
     setToast(text)
     window.setTimeout(() => setToast(''), 3500)
   }, [])
+
+  const enableNotificationSound = useCallback(async () => {
+    if (!window.AudioContext) {
+      notify('Notification sounds are not supported in this browser.')
+      return false
+    }
+    try {
+      audioContextRef.current ||= new window.AudioContext()
+      await audioContextRef.current.resume()
+      return true
+    } catch (error) {
+      notify(`Could not enable notification sound: ${error.message}`)
+      return false
+    }
+  }, [notify])
+
+  const playNotificationSound = useCallback(async () => {
+    const context = audioContextRef.current
+    if (!notificationSoundEnabledRef.current || !context) return
+    try {
+      if (context.state !== 'running') await context.resume()
+      if (context.state !== 'running') return
+      const oscillator = context.createOscillator()
+      const volume = context.createGain()
+      const now = context.currentTime
+      oscillator.type = 'sine'
+      oscillator.frequency.setValueAtTime(740, now)
+      volume.gain.setValueAtTime(0.001, now)
+      volume.gain.exponentialRampToValueAtTime(0.035, now + 0.02)
+      volume.gain.exponentialRampToValueAtTime(0.001, now + 0.18)
+      oscillator.connect(volume)
+      volume.connect(context.destination)
+      oscillator.start(now)
+      oscillator.stop(now + 0.19)
+    } catch (error) {
+      notify(`Could not play notification sound: ${error.message}`)
+    }
+  }, [notify])
 
   useEffect(() => {
     if (!session?.user?.id) {
@@ -359,7 +408,9 @@ function App() {
     })).filter(Boolean))
     setBlockedUsers((blockedRows || []).map((row) => row.blocked_id))
     setRequests(requestRows || [])
-    setNotifications(notificationRows || [])
+    const loadedNotifications = notificationRows || []
+    notificationIdsRef.current = new Set(loadedNotifications.map((item) => item.id))
+    setNotifications(loadedNotifications)
     setActiveId((current) => current && normalized.some((conversation) => conversation.id === current) ? current : null)
   }, [session, notify])
 
@@ -384,7 +435,12 @@ function App() {
       })
       .on('postgres_changes', { event: '*', schema: 'public', table: 'friend_requests', filter: `receiver_id=eq.${session.user.id}` }, () => loadWorkspace())
       .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'notifications', filter: `user_id=eq.${session.user.id}` }, (payload) => {
-        setNotifications((current) => [payload.new, ...current])
+        if (!payload.new?.id || notificationIdsRef.current.has(payload.new.id)) return
+        notificationIdsRef.current.add(payload.new.id)
+        setNotifications((current) => current.some((item) => item.id === payload.new.id)
+          ? current
+          : [payload.new, ...current].slice(0, 100))
+        playNotificationSound()
         if (notificationsEnabledRef.current && 'Notification' in window && Notification.permission === 'granted') {
           new Notification(payload.new.title || 'Chatter', {
             body: payload.new.body || 'You have a new update.',
@@ -393,7 +449,11 @@ function App() {
           })
         }
       })
-      .subscribe()
+      .subscribe((status) => {
+        if (status === 'SUBSCRIBED') setConnectionStatus('connected')
+        else if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT' || status === 'CLOSED') setConnectionStatus('disconnected')
+        else setConnectionStatus('connecting')
+      })
     const presence = supabase.channel('online-presence', { config: { presence: { key: session.user.id } } })
     let heartbeatId
     presence.on('presence', { event: 'sync' }, () => {
@@ -422,7 +482,7 @@ function App() {
       supabase.from('profiles').update({ is_online: false, last_seen_at: new Date().toISOString() }).eq('id', session.user.id)
         .then(({ error }) => { if (error) notify(error.message) })
     }
-  }, [session, loadWorkspace, notify])
+  }, [session, loadWorkspace, notify, playNotificationSound])
 
   useEffect(() => {
     if (tab !== 'notifications' || !session?.user) return
@@ -437,8 +497,9 @@ function App() {
   }, [tab, session, notifications, notify])
 
   useEffect(() => {
-    if (!activeId || !session?.user) { setMessages([]); setHasOlderMessages(false); return }
+    if (!activeId || !session?.user) { setMessages([]); setHasOlderMessages(false); setMessagesLoading(false); return }
     let alive = true
+    setMessagesLoading(true)
     const pendingRefreshes = new Set()
     let refreshTimer
     async function refreshRealtimeMessage(messageId) {
@@ -489,9 +550,14 @@ function App() {
         .select('*, profiles:sender_id(id, username, full_name, avatar_url), message_reactions(id, user_id, emoji), message_receipts(user_id, read_at)')
         .eq('conversation_id', activeId).is('deleted_at', null)
         .order('created_at', { ascending: false }).order('id', { ascending: false }).limit(MESSAGE_PAGE_SIZE)
-      if (error) { notify(error.message); return }
+      if (error) {
+        if (alive) setMessagesLoading(false)
+        notify(error.message)
+        return
+      }
       const page = await addSignedAttachmentUrls(data || [], notify)
       if (alive) {
+        setMessagesLoading(false)
         setHasOlderMessages(page.length === MESSAGE_PAGE_SIZE)
         setMessages((current) => {
           if (!current.length) return page.reverse()
@@ -550,6 +616,7 @@ function App() {
     localStorage.setItem('chatter-theme', theme)
   }, [theme])
   useEffect(() => { localStorage.setItem('chatter-notifications', String(notificationsEnabled)) }, [notificationsEnabled])
+  useEffect(() => { localStorage.setItem('chatter-notification-sound', String(notificationSoundEnabled)) }, [notificationSoundEnabled])
 
   useEffect(() => {
     if (!session?.user || !activeId) return
@@ -1089,7 +1156,7 @@ function App() {
           {tab === 'search' && <><form className="people-search" onSubmit={searchUsers}><Search size={17} /><input autoFocus value={userSearch} onChange={(event) => setUserSearch(event.target.value)} placeholder="Username or Chatter ID" /><button className="primary-button search-submit" disabled={searching}>{searching ? 'Searching…' : 'Search'}</button></form>{searchResults.map((person) => <div className="search-result" key={person.id}><Avatar profile={person} online={person.is_online} /><span className="contact-copy"><strong>{person.full_name}</strong><small>@{person.username} · {person.user_id} · {person.is_online ? 'Online' : person.last_seen_at ? `Seen ${formatTime(person.last_seen_at)}` : 'Offline'}</small></span><div className="result-actions"><button className="subtle-button" onClick={() => sendFriendRequest(person)} title="Add friend"><Plus size={16} /></button><button className="primary-button result-message" onClick={() => openDirect(person)}>Message</button></div></div>)}{!searching && userSearch && !searchResults.length && <div className="empty-sidebar"><strong>No one found</strong><span>Check the spelling or try their exact username or ID.</span></div>}<div className="search-hint"><Info size={14} />Search exact usernames or unique Chatter IDs.</div></>}
           {tab === 'notifications' && (notifications.length ? notifications.map((notification) => <div className="activity-row" key={notification.id}><span className="activity-icon"><Bell size={15} /></span><span><strong>{notification.title || 'Chatter update'}</strong><small>{notification.body || notification.type}</small><small>{formatTime(notification.created_at)}</small></span></div>) : <div className="empty-sidebar"><div className="empty-icon"><Bell size={20} /></div><strong>Nothing new</strong><span>Your latest activity will appear here.</span></div>)}
         </div>
-        <footer className="sidebar-footer"><div className="footer-status"><i />All systems ready</div><button className="footer-help" onClick={() => notify('Tip: search for a username or Chatter ID to find friends.')}><CircleHelp size={15} /> Help & tips</button></footer>
+        <footer className="sidebar-footer"><div className={`footer-status connection-${connectionStatus}`} role="status" aria-live="polite"><i />{connectionStatus === 'connected' ? 'Connected' : connectionStatus === 'disconnected' ? 'Reconnecting…' : 'Connecting…'}</div><button className="footer-help" onClick={() => notify('Tip: search for a username or Chatter ID to find friends.')}><CircleHelp size={15} /> Help & tips</button></footer>
       </aside>
 
       <section className={`chat-area ${activeConversation ? 'chat-area-active' : ''}`}>
@@ -1103,14 +1170,19 @@ function App() {
           <div className="chat-canvas" ref={chatCanvasRef}>
             {hasOlderMessages && <button className="load-older-button" type="button" onClick={loadOlderMessages} disabled={loadingOlderMessages}>{loadingOlderMessages ? 'Loading…' : 'Load older messages'}</button>}
             <div className="conversation-date"><span>CONVERSATION</span></div>
-            {messages.length === 0 && <div className="chat-empty"><span className="chat-empty-icon">{activeConversation.is_group ? <Users size={24} /> : <MessageCircle size={24} />}</span><strong>This is the start of something good.</strong><span>Say hello to {activeTitle}.</span></div>}
+            {messagesLoading && <div className="message-skeleton-list" aria-label="Loading messages">
+              {[0, 1, 2, 3].map((item) => <div key={item} className={`message-skeleton-row ${item % 2 ? 'message-skeleton-own' : ''}`}><span /></div>)}
+            </div>}
+            {!messagesLoading && messages.length === 0 && <div className="chat-empty"><span className="chat-empty-icon">{activeConversation.is_group ? <Users size={24} /> : <MessageCircle size={24} />}</span><strong>This is the start of something good.</strong><span>Say hello to {activeTitle}.</span></div>}
             {messages.map((message, index) => {
               const own = message.sender_id === session.user.id
               const previous = messages[index - 1]
               const grouped = previous?.sender_id === message.sender_id && new Date(message.created_at) - new Date(previous.created_at) < 300000
               const delivered = own && message.message_receipts?.some((receipt) => receipt.user_id !== session.user.id)
               const seen = own && message.message_receipts?.some((receipt) => receipt.user_id !== session.user.id && receipt.read_at)
-              return <div className={`message-line ${own ? 'message-own' : ''} ${grouped ? 'message-grouped' : ''}`} key={message.id} id={`message-${message.id}`}>
+              return <React.Fragment key={message.id}>
+                {message.id === firstUnreadMessageId && <div className="unread-message-divider"><span>Unread messages</span></div>}
+                <div className={`message-line ${own ? 'message-own' : ''} ${grouped ? 'message-grouped' : ''}`} id={`message-${message.id}`}>
                 {!own && !grouped && <Avatar profile={message.profiles} size="tiny" />}
                 {!own && grouped && <span className="avatar-spacer" />}
                 <div className="message-content-wrap">
@@ -1120,8 +1192,8 @@ function App() {
                     return original ? `Replying to ${original.profiles?.full_name || 'a message'}: ${original.content}` : 'Replying to an earlier message'
                   })()}</div>}
                   {message.is_pinned && <div className="message-pin-badge"><Pin size={12} /> Pinned for everyone</div>}
-                  {message.type === 'image' && <a href={message.attachment_url} target="_blank" rel="noreferrer"><img className="message-image" src={message.attachment_url} alt={message.content} /></a>}
-                  {message.type === 'video' && <video className="message-video" src={message.attachment_url} controls />}
+                  {message.type === 'image' && <a href={message.attachment_url} target="_blank" rel="noreferrer"><img className="message-image" src={message.attachment_url} alt={message.content} loading="lazy" decoding="async" /></a>}
+                  {message.type === 'video' && <video className="message-video" src={message.attachment_url} controls preload="metadata" />}
                   {message.type === 'audio' && <audio src={message.attachment_url} controls />}
                   {message.type === 'file' && <a className="file-attachment" href={message.attachment_url} target="_blank" rel="noreferrer"><FileText size={20} /><span>{message.content}<small>Open attachment</small></span></a>}
                   {message.type === 'text' && <div className="message-bubble"><span>{message.content}</span>{message.edited_at && <small className="edited-label">edited</small>}</div>}
@@ -1136,7 +1208,8 @@ function App() {
                     {own && <><button title="Edit" aria-label="Edit" onClick={() => editMessage(message)}><MoreHorizontal size={14} /></button><button title="Delete for everyone" aria-label="Delete for everyone" onClick={() => deleteMessage(message)}><X size={14} /></button></>}
                   </div>
                 </div>
-              </div>
+                </div>
+              </React.Fragment>
             })}
             {Object.entries(typingUsers).some(([userId, isTyping]) => isTyping && userId !== session.user.id) && <div className="typing-indicator"><i /><i /><i /><span>{activeTitle} is typing</span></div>}
             <div ref={bottomRef} />
@@ -1187,7 +1260,7 @@ function App() {
         const { data, error } = await supabase.from('profiles').update(updates).eq('id', session.user.id).select('id,user_id,username,full_name,bio,avatar_url,discoverable,show_online_status,show_last_seen,created_at').single()
         if (error) { notify(error.message); return false }
         setProfile(data); await loadWorkspace(); return true
-      }} theme={theme} setTheme={setTheme} notify={notify} notificationsEnabled={notificationsEnabled} setNotificationsEnabled={setNotificationsEnabled} />}
+      }} theme={theme} setTheme={setTheme} notify={notify} notificationsEnabled={notificationsEnabled} setNotificationsEnabled={setNotificationsEnabled} notificationSoundEnabled={notificationSoundEnabled} setNotificationSoundEnabled={setNotificationSoundEnabled} enableNotificationSound={enableNotificationSound} />}
       {showGroup && <GroupModal friends={friends} onClose={() => setShowGroup(false)} onCreate={createGroup} busy={busy} />}
       {toast && <div className="toast"><span className="toast-check"><Check size={14} /></span>{toast}</div>}
       <nav className="mobile-bottom-nav"><button onClick={() => { setTab('chats'); setActiveId(null) }} className={tab === 'chats' ? 'mobile-nav-selected' : ''}><MessageCircle size={19} /><span>Chats</span></button><button onClick={() => { setTab('contacts'); setActiveId(null) }} className={tab === 'contacts' ? 'mobile-nav-selected' : ''}><Users size={19} /><span>People</span></button><button onClick={() => { setTab('search'); setActiveId(null) }} className={tab === 'search' ? 'mobile-nav-selected' : ''}><Search size={19} /><span>Discover</span></button><button onClick={() => setShowSettings(true)}><Settings size={19} /><span>Settings</span></button></nav>
@@ -1252,7 +1325,7 @@ function ProfileModal({ profile, email, onClose, onSave, notify }) {
   </div>
 }
 
-function SettingsModal({ profile, email, blockedUsers, onUnblock, onDeleteAccount, onClose, onSignOut, onSave, theme, setTheme, notify, notificationsEnabled, setNotificationsEnabled }) {
+function SettingsModal({ profile, email, blockedUsers, onUnblock, onDeleteAccount, onClose, onSignOut, onSave, theme, setTheme, notify, notificationsEnabled, setNotificationsEnabled, notificationSoundEnabled, setNotificationSoundEnabled, enableNotificationSound }) {
   const [section, setSection] = useState('privacy')
   const [form, setForm] = useState({
     discoverable: profile?.discoverable ?? true,
@@ -1324,6 +1397,10 @@ function SettingsModal({ profile, email, blockedUsers, onUnblock, onDeleteAccoun
               const permission = Notification.permission === 'granted' ? 'granted' : await Notification.requestPermission()
               if (permission === 'granted') setNotificationsEnabled(true)
               else notify('Browser notification permission was not granted.')
+            }} /></label>
+            <label className="setting-option"><span><strong>Notification sound</strong><small>Play a short sound for new activity.</small></span><input type="checkbox" checked={notificationSoundEnabled} onChange={async (event) => {
+              if (!event.target.checked) { setNotificationSoundEnabled(false); return }
+              if (await enableNotificationSound()) setNotificationSoundEnabled(true)
             }} /></label>
             <div className="settings-info-card"><Bell size={17} /><span>Desktop notifications appear only while Chatter is open and browser permission is enabled.</span></div>
           </div>}

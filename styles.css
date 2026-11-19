@@ -1,7 +1,7 @@
-@import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Manrope:wght@400;500;600;700;800&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Manrope:wght@400;500;600;700;800&display=swap');
 
 :root {
-  font-family: 'DM Sans', sans-serif;
+  font-family: 'Inter', sans-serif;
   color: #1b2b29;
   background: #f3f6f5;
   font-synthesis: none;
@@ -793,4 +793,22 @@ html[data-theme=dark] .conversation-pin:hover, html[data-theme=dark] .conversati
 @media (max-width: 700px) {
   .conversation-pin { opacity: 1; }
   .conversation-entry .conversation-row { padding-right: 46px; }
+}
+.unread-message-divider { display: flex; align-items: center; gap: 12px; margin: 24px auto; color: #788780; font-size: 11px; font-weight: 600; }
+.unread-message-divider::before, .unread-message-divider::after { content: ''; height: 1px; flex: 1; background: #dce5df; }
+.message-skeleton-list { display: grid; gap: 16px; max-width: 560px; margin: 28px auto; }
+.message-skeleton-row { display: flex; }
+.message-skeleton-own { justify-content: flex-end; }
+.message-skeleton-row span { width: min(58%, 320px); height: 48px; border-radius: 4px 16px 16px 16px; background: linear-gradient(90deg, #edf2ee 20%, #f7faf7 38%, #edf2ee 62%); background-size: 300% 100%; animation: message-skeleton-shimmer 1.4s ease infinite; }
+.message-skeleton-own span { width: min(48%, 270px); background-color: #e6f4eb; border-radius: 16px 4px 16px 16px; }
+@keyframes message-skeleton-shimmer { to { background-position: -150% 0; } }
+.connection-connected i { background: #32b77a; }
+.connection-connecting i { background: #d6a64c; animation: pulse 1.2s infinite; }
+.connection-disconnected i { background: #d66b61; }
+html[data-theme=dark] .unread-message-divider { color: #aab9b1; }
+html[data-theme=dark] .unread-message-divider::before, html[data-theme=dark] .unread-message-divider::after { background: #405048; }
+html[data-theme=dark] .message-skeleton-row span { background: linear-gradient(90deg, #26362e 20%, #31443a 38%, #26362e 62%); background-size: 300% 100%; }
+html[data-theme=dark] .message-skeleton-own span { background: #174536; }
+@media (prefers-reduced-motion: reduce) {
+  .message-skeleton-row span { animation: none; }
 }
