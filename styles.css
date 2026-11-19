@@ -515,12 +515,12 @@ html[data-theme=dark] .theme-choice button.theme-choice-selected { color: #c1e8c
 html[data-theme=dark] .account-danger-zone { background: #302321; border-color: #59403a; }
 @media (max-width: 600px) {
   .settings-window { height: min(720px, calc(100dvh - 20px)); border-radius: 11px; }
-  .settings-layout { grid-template-columns: 1fr; grid-template-rows: auto minmax(0, 1fr); }
-  .settings-nav { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 4px; padding: 10px; border-right: 0; border-bottom: 1px solid var(--line); }
+  .settings-layout { grid-template-columns: minmax(105px, 32%) minmax(0, 1fr); grid-template-rows: minmax(0, 1fr); }
+  .settings-nav { display: flex; flex-direction: column; gap: 3px; overflow-y: auto; padding: 10px 7px; border-right: 1px solid var(--line); border-bottom: 0; }
   .settings-nav-heading, .settings-nav-account { display: none; }
-  .settings-nav-item { min-height: 48px; align-items: center; justify-content: center; flex-direction: column; gap: 3px; padding: 5px 2px; text-align: center; font-size: 8px; }
+  .settings-nav-item { min-height: 40px; align-items: center; justify-content: flex-start; flex-direction: row; gap: 7px; padding: 7px 6px; text-align: left; font-size: 8px; line-height: 1.25; }
   .settings-nav-item svg { width: 15px; height: 15px; }
-  .settings-content { padding: 20px 18px 24px; }
+  .settings-content { padding: 18px 12px 20px; }
 }
 @media (max-width: 390px) {
   .profile-view { padding: 18px; }
@@ -620,8 +620,10 @@ html[data-theme=dark] .account-danger-zone { background: #302321; border-color: 
   .settings-topbar { padding-inline: 12px; }
   .settings-topbar > div { gap: 6px; font-size: 9px; }
   .settings-content { padding-inline: 14px; }
-  .settings-nav { grid-template-columns: repeat(3, minmax(0, 1fr)); padding: 7px; }
-  .settings-nav-item { font-size: 7px; }
+  .settings-layout { grid-template-columns: minmax(94px, 31%) minmax(0, 1fr); }
+  .settings-nav { padding-inline: 5px; }
+  .settings-nav-item { gap: 5px; padding-inline: 5px; font-size: 7px; }
+  .settings-nav-item svg { width: 14px; height: 14px; flex: 0 0 14px; }
   .auth-art { min-height: 190px; height: 24vh; }
   .auth-panel { min-height: 76vh; padding: 28px 7%; }
   .auth-card h2 { font-size: 26px; }
@@ -632,7 +634,8 @@ html[data-theme=dark] .account-danger-zone { background: #302321; border-color: 
   .composer-icon { width: 27px; flex-basis: 27px; }
   .emoji-button { width: 25px; flex-basis: 25px; }
   .send-button { width: 34px; height: 34px; flex-basis: 34px; }
-  .settings-nav-item { font-size: 6.5px; }
+  .settings-layout { grid-template-columns: minmax(88px, 30%) minmax(0, 1fr); }
+  .settings-nav-item { gap: 4px; padding-inline: 4px; font-size: 6.5px; }
 }
 
 @media (max-height: 500px) and (max-width: 700px) {
