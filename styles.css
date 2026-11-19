@@ -777,3 +777,20 @@ html[data-theme=dark] .settings-nav-selected, html[data-theme=dark] .settings-na
   .message-video { width: min(82vw, 420px); max-height: 340px; }
   .composer-input input { font-size: 16px; }
 }
+.chat-list-section { padding: 2px 0 8px; }
+.chat-list-section-heading { display: flex; align-items: center; gap: 7px; margin: 12px 18px 5px; color: #788780; font-size: 11px; font-weight: 700; }
+.chat-list-section-heading svg { color: var(--green-2); }
+.conversation-entry { position: relative; margin: 2px 7px; }
+.conversation-entry .conversation-row { width: 100%; margin: 0; padding-right: 45px; }
+.conversation-entry .conversation-selected::before { inset-inline-start: 0; }
+.conversation-pin { position: absolute; top: 50%; right: 9px; width: 30px; height: 30px; display: grid; place-items: center; padding: 0; color: #899790; border: 0; border-radius: 8px; background: transparent; opacity: 0; transform: translateY(-50%); transition: opacity .15s, color .15s, background .15s; }
+.conversation-entry:hover .conversation-pin, .conversation-pin:focus-visible, .conversation-pin-active { opacity: 1; }
+.conversation-pin:hover, .conversation-pin-active { color: var(--green-2); background: #eaf4ed; }
+.conversation-pin-active svg { fill: currentColor; }
+.pinned-only-note { padding: 8px 18px 12px 38px; color: #87938d; font-size: 12px; }
+html[data-theme=dark] .chat-list-section-heading, html[data-theme=dark] .pinned-only-note { color: #aebdb4; }
+html[data-theme=dark] .conversation-pin:hover, html[data-theme=dark] .conversation-pin-active { color: #b6e4c8; background: #234136; }
+@media (max-width: 700px) {
+  .conversation-pin { opacity: 1; }
+  .conversation-entry .conversation-row { padding-right: 46px; }
+}

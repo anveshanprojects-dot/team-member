@@ -183,6 +183,7 @@ function App() {
   const [databaseSetupRequired, setDatabaseSetupRequired] = useState(false)
   const [profile, setProfile] = useState(null)
   const [conversations, setConversations] = useState([])
+  const [pinnedConversationIds, setPinnedConversationIds] = useState([])
   const [activeId, setActiveId] = useState(null)
   const [messages, setMessages] = useState([])
   const [hasOlderMessages, setHasOlderMessages] = useState(false)
@@ -242,6 +243,20 @@ function App() {
     setToast(text)
     window.setTimeout(() => setToast(''), 3500)
   }, [])
+
+  useEffect(() => {
+    if (!session?.user?.id) {
+      setPinnedConversationIds([])
+      return
+    }
+    try {
+      const savedPins = JSON.parse(localStorage.getItem(`chatter-pinned-${session.user.id}`) || '[]')
+      setPinnedConversationIds(Array.isArray(savedPins) ? savedPins.filter((id) => typeof id === 'string') : [])
+    } catch (error) {
+      notify(`Could not load pinned chats: ${error.message}`)
+      setPinnedConversationIds([])
+    }
+  }, [session?.user?.id, notify])
 
   useEffect(() => {
     if (!supabase) { setInitializing(false); return }
@@ -991,6 +1006,40 @@ function App() {
   const startTyping = () => typingChannel.current?.send({ type: 'broadcast', event: 'typing', payload: { userId: session.user.id, isTyping: true } })
   const unreadTotal = conversations.reduce((sum, conversation) => sum + conversation.unread, 0)
   const appClass = `app-shell ${activeConversation ? 'conversation-open' : ''}`
+  const pinnedConversations = filteredConversations.filter((conversation) => pinnedConversationIds.includes(conversation.id))
+  const recentConversations = filteredConversations.filter((conversation) => !pinnedConversationIds.includes(conversation.id))
+
+  function togglePinnedConversation(conversationId) {
+    const nextPins = pinnedConversationIds.includes(conversationId)
+      ? pinnedConversationIds.filter((id) => id !== conversationId)
+      : [conversationId, ...pinnedConversationIds]
+    try {
+      localStorage.setItem(`chatter-pinned-${session.user.id}`, JSON.stringify(nextPins))
+      setPinnedConversationIds(nextPins)
+    } catch (error) {
+      notify(`Could not save pinned chats: ${error.message}`)
+    }
+  }
+
+  function renderConversationRow(conversation) {
+    const person = conversation.members?.find((member) => member.id !== session.user.id)
+    const selected = activeId === conversation.id
+    const isPinned = pinnedConversationIds.includes(conversation.id)
+    return <div className="conversation-entry" key={conversation.id}>
+      <button className={`conversation-row ${selected ? 'conversation-selected' : ''}`} onClick={() => { setActiveId(conversation.id); setShowMobileMenu(false) }}>
+        <Avatar profile={conversation.is_group ? null : person} online={!conversation.is_group && person?.is_online} size="large" />
+        {conversation.is_group && <span className="group-avatar"><Users size={19} /></span>}
+        <span className="conversation-copy">
+          <span className="conversation-title">{conversation.is_group ? conversation.name : person?.full_name || person?.username || 'Unknown user'}</span>
+          <span className="conversation-preview">{conversation.last_message?.sender_id === session.user.id ? 'You: ' : ''}{conversation.last_message?.content || (conversation.is_group ? 'Group conversation' : 'Say hello 👋')}</span>
+        </span>
+        <span className="conversation-meta"><time>{formatTime(conversation.last_message?.created_at || conversation.updated_at)}</time>{conversation.unread > 0 && <i className="unread-count">{conversation.unread}</i>}</span>
+      </button>
+      <button type="button" className={`conversation-pin ${isPinned ? 'conversation-pin-active' : ''}`} aria-label={isPinned ? 'Unpin chat' : 'Pin chat'} aria-pressed={isPinned} title={isPinned ? 'Unpin chat' : 'Pin chat'} onClick={() => togglePinnedConversation(conversation.id)}>
+        <Pin size={15} />
+      </button>
+    </div>
+  }
 
   return (
     <main className={appClass}>
@@ -1021,18 +1070,20 @@ function App() {
           <button className={tab === 'requests' ? 'nav-item selected' : 'nav-item'} onClick={() => setTab('requests')}><ArrowDown size={18} />Requests{requests.length > 0 && <span className="nav-badge">{requests.length}</span>}</button>
           <button className={tab === 'notifications' ? 'nav-item selected' : 'nav-item'} onClick={() => setTab('notifications')}><Bell size={18} />Activity{notifications.some((item) => !item.read_at) && <i className="nav-dot" />}</button>
         </nav>
-        <div className="list-heading"><span>{tab === 'chats' ? 'DIRECT MESSAGES' : tab === 'contacts' ? 'TEAM CONTACTS' : tab === 'requests' ? 'INCOMING REQUESTS' : tab === 'search' ? 'FIND TEAMMATES' : tab === 'notifications' ? 'RECENT ACTIVITY' : 'DIRECT MESSAGES'}</span>{tab === 'chats' && <button className="icon-button small-icon" onClick={() => setShowGroup(true)} title="Create a group"><Plus size={17} /></button>}</div>
+        <div className="list-heading"><span>{tab === 'chats' ? 'CHATS' : tab === 'contacts' ? 'TEAM CONTACTS' : tab === 'requests' ? 'INCOMING REQUESTS' : tab === 'search' ? 'FIND TEAMMATES' : tab === 'notifications' ? 'RECENT ACTIVITY' : 'CHATS'}</span>{tab === 'chats' && <button className="icon-button small-icon" onClick={() => setShowGroup(true)} title="Create a group"><Plus size={17} /></button>}</div>
         <div className="sidebar-list">
-          {tab === 'chats' && (filteredConversations.length ? filteredConversations.map((conversation) => {
-            const person = conversation.members?.find((member) => member.id !== session.user.id)
-            const selected = activeId === conversation.id
-            return <button className={`conversation-row ${selected ? 'conversation-selected' : ''}`} key={conversation.id} onClick={() => { setActiveId(conversation.id); setShowMobileMenu(false) }}>
-              <Avatar profile={conversation.is_group ? null : person} online={!conversation.is_group && person?.is_online} size="large" />
-              {conversation.is_group && <span className="group-avatar"><Users size={19} /></span>}
-              <span className="conversation-copy"><span className="conversation-title">{conversation.is_group ? conversation.name : person?.full_name || person?.username || 'Unknown user'}</span><span className="conversation-preview">{conversation.last_message?.sender_id === session.user.id ? 'You: ' : ''}{conversation.last_message?.content || (conversation.is_group ? 'Group conversation' : 'Say hello 👋')}</span></span>
-              <span className="conversation-meta"><time>{formatTime(conversation.last_message?.created_at || conversation.updated_at)}</time>{conversation.unread > 0 && <i className="unread-count">{conversation.unread}</i>}</span>
-            </button>
-          }) : <div className="empty-sidebar"><div className="empty-icon"><MessageCircle size={20} /></div><strong>{query ? 'No conversations found' : 'A quiet inbox'}</strong><span>{query ? 'Try another search.' : 'Find someone and start chatting.'}</span><button className="text-button" onClick={() => setTab('search')}>Find people <ArrowUpRight size={14} /></button></div>)}
+          {tab === 'chats' && (filteredConversations.length ? <>
+            {pinnedConversations.length > 0 && <section className="chat-list-section">
+              <h3 className="chat-list-section-heading"><Pin size={13} />Pinned</h3>
+              {pinnedConversations.map(renderConversationRow)}
+            </section>}
+            <section className="chat-list-section">
+              <h3 className="chat-list-section-heading">Recent chats</h3>
+              {recentConversations.length
+                ? recentConversations.map(renderConversationRow)
+                : <div className="pinned-only-note">All conversations are pinned.</div>}
+            </section>
+          </> : <div className="empty-sidebar"><div className="empty-icon"><MessageCircle size={20} /></div><strong>{query ? 'No conversations found' : 'A quiet inbox'}</strong><span>{query ? 'Try another search.' : 'Find someone and start chatting.'}</span><button className="text-button" onClick={() => setTab('search')}>Find people <ArrowUpRight size={14} /></button></div>)}
           {tab === 'contacts' && (friends.length ? friends.map((person) => <div className="contact-row" key={person.id}><button className="contact-open" onClick={() => openDirect(person)}><Avatar profile={person} online={person.is_online} /><span className="contact-copy"><strong>{person.full_name}</strong><small>@{person.username}</small></span><MessageCircle size={17} /></button><button className="contact-remove" title={`Remove ${person.full_name}`} onClick={() => removeFriend(person)}><X size={15} /></button></div>) : <div className="empty-sidebar"><div className="empty-icon"><Users size={20} /></div><strong>Your circle starts here</strong><span>Find people by username or Chatter ID.</span><button className="text-button" onClick={() => setTab('search')}>Find someone <ArrowUpRight size={14} /></button></div>)}
           {tab === 'requests' && (requests.length ? requests.map((request) => <div className="request-row" key={request.id}><Avatar profile={request.profiles} /><span className="contact-copy"><strong>{request.profiles?.full_name}</strong><small>@{request.profiles?.username}</small></span><div className="request-actions"><button title="Accept request" disabled={busy} onClick={() => respondRequest(request, true)}><Check size={16} /></button><button title="Decline request" disabled={busy} onClick={() => respondRequest(request, false)}><X size={16} /></button></div></div>) : <div className="empty-sidebar"><div className="empty-icon"><ArrowDown size={20} /></div><strong>All caught up</strong><span>New friend requests will show up here.</span></div>)}
           {tab === 'search' && <><form className="people-search" onSubmit={searchUsers}><Search size={17} /><input autoFocus value={userSearch} onChange={(event) => setUserSearch(event.target.value)} placeholder="Username or Chatter ID" /><button className="primary-button search-submit" disabled={searching}>{searching ? 'Searching…' : 'Search'}</button></form>{searchResults.map((person) => <div className="search-result" key={person.id}><Avatar profile={person} online={person.is_online} /><span className="contact-copy"><strong>{person.full_name}</strong><small>@{person.username} · {person.user_id} · {person.is_online ? 'Online' : person.last_seen_at ? `Seen ${formatTime(person.last_seen_at)}` : 'Offline'}</small></span><div className="result-actions"><button className="subtle-button" onClick={() => sendFriendRequest(person)} title="Add friend"><Plus size={16} /></button><button className="primary-button result-message" onClick={() => openDirect(person)}>Message</button></div></div>)}{!searching && userSearch && !searchResults.length && <div className="empty-sidebar"><strong>No one found</strong><span>Check the spelling or try their exact username or ID.</span></div>}<div className="search-hint"><Info size={14} />Search exact usernames or unique Chatter IDs.</div></>}
