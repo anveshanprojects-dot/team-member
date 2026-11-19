@@ -1,0 +1,97 @@
+name: Deploy to GitHub Pages
+
+on:
+  push:
+    branches:
+      - main
+      - master
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: github-pages
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Find app folder
+        id: app
+        run: |
+          if [ -f package.json ]; then
+            app_dir=.
+          else
+            package_json="$(find . -mindepth 2 -maxdepth 4 -type f -name package.json -not -path '*/node_modules/*' -print -quit)"
+            if [ -z "$package_json" ]; then
+              echo "Could not find package.json at the repository root or in an uploaded project folder."
+              exit 1
+            fi
+            app_dir="$(dirname "$package_json")"
+          fi
+          echo "directory=$app_dir" >> "$GITHUB_OUTPUT"
+          echo "lockfile=$app_dir/package-lock.json" >> "$GITHUB_OUTPUT"
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: ${{ steps.app.outputs.lockfile }}
+
+      - name: Ensure source folder
+        working-directory: ${{ steps.app.outputs.directory }}
+        run: |
+          if [ ! -f src/main.jsx ]; then
+            for file in App.jsx main.jsx styles.css; do
+              if [ ! -f "$file" ]; then
+                echo "Missing src/main.jsx and root-level $file; upload the complete app source."
+                exit 1
+              fi
+            done
+            mkdir -p src
+            mv App.jsx main.jsx styles.css src/
+          fi
+          test -f src/App.jsx
+          test -f src/main.jsx
+          test -f src/styles.css
+
+      - name: Install dependencies
+        working-directory: ${{ steps.app.outputs.directory }}
+        run: npm ci
+
+      - name: Build site
+        working-directory: ${{ steps.app.outputs.directory }}
+        run: |
+          test -n "$VITE_SUPABASE_URL" || (echo "Missing VITE_SUPABASE_URL Actions secret" && exit 1)
+          test -n "$VITE_SUPABASE_ANON_KEY" || (echo "Missing VITE_SUPABASE_ANON_KEY Actions secret" && exit 1)
+          npm run build
+        env:
+          VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL }}
+          VITE_SUPABASE_ANON_KEY: ${{ secrets.VITE_SUPABASE_ANON_KEY }}
+
+      - name: Configure GitHub Pages
+        uses: actions/configure-pages@v5
+
+      - name: Upload site artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: ${{ steps.app.outputs.directory }}/dist
+
+  deploy:
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    runs-on: ubuntu-latest
+    needs: build
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
