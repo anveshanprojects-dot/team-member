@@ -100,11 +100,26 @@ function AuthScreen({ onAuthenticated }) {
     }
   }
 
+  async function signInWithGoogle() {
+    setBusy(true)
+    setError('')
+    try {
+      const { error: oauthError } = await supabase.auth.signInWithOAuth({
+        provider: 'google',
+        options: { redirectTo: new URL(import.meta.env.BASE_URL, window.location.origin).toString() },
+      })
+      if (oauthError) throw oauthError
+    } catch (oauthError) {
+      setError(oauthError.message || 'Google sign-in is unavailable. Please try again.')
+      setBusy(false)
+    }
+  }
+
   const heading = mode === 'register' ? 'Create your account' : mode === 'forgot' ? 'Reset your password' : 'Welcome back'
   return (
     <main className="auth-page">
       <div className="auth-art">
-        <div className="brand brand-light"><span className="brand-mark"><MessageCircle size={23} /></span> chatter</div>
+        <div className="brand brand-light"><span className="brand-mark"><MessageCircle size={23} /></span>Anveshan Chatter</div>
         <div className="art-copy">
           <div className="art-bubble bubble-one">The best conversations happen here. <span>✨</span></div>
           <div className="art-bubble bubble-two">Hey! Are we still on for coffee? <span>10:42</span></div>
@@ -119,7 +134,7 @@ function AuthScreen({ onAuthenticated }) {
         <div className="auth-card">
           <span className="eyebrow">{mode === 'register' ? 'GET STARTED' : mode === 'forgot' ? 'ACCOUNT RECOVERY' : 'YOUR PEOPLE ARE HERE'}</span>
           <h2>{heading}</h2>
-          <p className="muted">{mode === 'register' ? 'Join Chatter and make room for more meaningful conversations.' : mode === 'forgot' ? 'We’ll send you a link to get back into your account.' : 'Sign in to pick up right where you left off.'}</p>
+          <p className="muted">{mode === 'register' ? 'Join Anveshan Chatter and make room for more meaningful conversations.' : mode === 'forgot' ? 'We’ll send you a link to get back into your account.' : 'Sign in to pick up right where you left off.'}</p>
           {error && <div className="alert alert-error">{error}</div>}
           {message && <div className="alert alert-success">{message}</div>}
           <form onSubmit={submit} className="auth-form">
@@ -132,7 +147,11 @@ function AuthScreen({ onAuthenticated }) {
             {mode === 'login' && <button className="text-button forgot-link" type="button" onClick={() => { setMode('forgot'); setError(''); setMessage('') }}>Forgot password?</button>}
             <button className="primary-button auth-submit" disabled={busy}>{busy ? <span className="spinner" /> : mode === 'forgot' ? 'Send reset link' : mode === 'register' ? 'Create account' : 'Sign in'} {!busy && <ArrowUpRight size={17} />}</button>
           </form>
-          <p className="auth-switch">{mode === 'forgot' ? 'Remember your password?' : mode === 'register' ? 'Already have an account?' : 'New to Chatter?'} <button className="text-button" onClick={() => { setMode(mode === 'register' || mode === 'forgot' ? 'login' : 'register'); setError(''); setMessage('') }}>{mode === 'register' || mode === 'forgot' ? 'Sign in' : 'Create an account'}</button></p>
+          {mode === 'login' && <div className="auth-alternative">
+            <span>or</span>
+            <button type="button" className="google-signin-button" disabled={busy} onClick={signInWithGoogle}><b>G</b>Continue with Google</button>
+          </div>}
+          <p className="auth-switch">{mode === 'forgot' ? 'Remember your password?' : mode === 'register' ? 'Already have an account?' : 'New to Anveshan Chatter?'} <button className="text-button" onClick={() => { setMode(mode === 'register' || mode === 'forgot' ? 'login' : 'register'); setError(''); setMessage('') }}>{mode === 'register' || mode === 'forgot' ? 'Sign in' : 'Create an account'}</button></p>
           {mode !== 'register' && mode !== 'forgot' && <div className="auth-security"><Info size={14} /> Your chats are private and secured with Supabase Auth.</div>}
         </div>
       </section>
@@ -167,7 +186,7 @@ function PasswordRecoveryScreen({ onComplete }) {
     <p className="muted">{complete ? 'Your account is secure with the new password.' : 'Enter a new password for your account.'}</p>
     {error && <div className="alert alert-error" role="alert">{error}</div>}
     {complete
-      ? <button className="primary-button auth-submit" onClick={onComplete}>Continue to Chatter <ArrowUpRight size={17} /></button>
+      ? <button className="primary-button auth-submit" onClick={onComplete}>Continue to Anveshan Chatter <ArrowUpRight size={17} /></button>
       : <form onSubmit={submit} className="auth-form">
         <label>New password<input required type="password" autoComplete="new-password" minLength="8" value={password} onChange={(event) => setPassword(event.target.value)} /></label>
         <label>Confirm new password<input required type="password" autoComplete="new-password" minLength="8" value={confirmation} onChange={(event) => setConfirmation(event.target.value)} /></label>
@@ -199,6 +218,7 @@ function App() {
   const [query, setQuery] = useState('')
   const [userSearch, setUserSearch] = useState('')
   const [searchResults, setSearchResults] = useState([])
+  const [profilePreview, setProfilePreview] = useState(null)
   const [searching, setSearching] = useState(false)
   const [draft, setDraft] = useState('')
   const [replyTo, setReplyTo] = useState(null)
@@ -260,7 +280,7 @@ function App() {
     settingsUrl.hash = 'settings'
     const settingsTab = window.open(settingsUrl.toString(), '_blank')
     if (!settingsTab) {
-      notify('Your browser blocked the Settings tab. Allow pop-ups for Chatter and try again.')
+      notify('Your browser blocked the Settings tab. Allow pop-ups for Anveshan Chatter and try again.')
       return
     }
     settingsTab.opener = null
@@ -463,7 +483,7 @@ function App() {
           : [payload.new, ...current].slice(0, 100))
         playNotificationSound()
         if (notificationsEnabledRef.current && 'Notification' in window && Notification.permission === 'granted') {
-          new Notification(payload.new.title || 'Chatter', {
+          new Notification(payload.new.title || 'Anveshan Chatter', {
             body: payload.new.body || 'You have a new update.',
             silent: true,
             tag: payload.new.id,
@@ -1232,14 +1252,14 @@ function App() {
     enableNotificationSound,
   }
 
-  if (!supabase) return <div className="setup-screen"><div className="setup-card"><div className="brand"><span className="brand-mark"><MessageCircle size={23} /></span> chatter</div><h1>Almost there.</h1><p>Add your Supabase project URL and anon key to a <code>.env</code> file to connect Chatter to its live backend.</p><pre>VITE_SUPABASE_URL=https://…supabase.co{'\n'}VITE_SUPABASE_ANON_KEY=…</pre><p>Then run <code>npm run dev</code>. See <a href="./README.md">README.md</a> for database setup.</p></div></div>
+  if (!supabase) return <div className="setup-screen"><div className="setup-card"><div className="brand"><span className="brand-mark"><MessageCircle size={23} /></span>Anveshan Chatter</div><h1>Almost there.</h1><p>Add your Supabase project URL and anon key to a <code>.env</code> file to connect Anveshan Chatter to its live backend.</p><pre>VITE_SUPABASE_URL=https://…supabase.co{'\n'}VITE_SUPABASE_ANON_KEY=…</pre><p>Then run <code>npm run dev</code>. See <a href="./README.md">README.md</a> for database setup.</p></div></div>
   if (initializing) return <div className="loading-screen"><span className="spinner spinner-large" /><span>Getting things ready…</span></div>
   if (passwordRecovery) return <PasswordRecoveryScreen onComplete={() => setPasswordRecovery(false)} />
   if (!session) return <AuthScreen onAuthenticated={setSession} />
   if (databaseSetupRequired) return <div className="setup-screen"><div className="setup-card">
-    <div className="brand"><span className="brand-mark"><MessageCircle size={23} /></span> chatter</div>
+    <div className="brand"><span className="brand-mark"><MessageCircle size={23} /></span>Anveshan Chatter</div>
     <h1>Connect your database.</h1>
-    <p>Authentication is working, but Chatter’s database tables are missing from this Supabase project. Messaging and profiles need the schema installed first.</p>
+    <p>Authentication is working, but Anveshan Chatter’s database tables are missing from this Supabase project. Messaging and profiles need the schema installed first.</p>
     <ol className="database-setup-steps">
       <li>Open your Supabase project and go to <strong>SQL Editor</strong>.</li>
       <li>Open <code>supabase/schema.sql</code> in this project, copy its contents, and run them in SQL Editor.</li>
@@ -1299,7 +1319,7 @@ function App() {
     <main className={appClass}>
       <aside className={`sidebar ${showMobileMenu ? 'mobile-menu-open' : ''}`}>
         <header className="sidebar-header">
-          <div className="brand"><span className="brand-mark"><MessageCircle size={21} /></span> chatter</div>
+          <div className="brand"><span className="brand-mark"><MessageCircle size={21} /></span>Anveshan Chatter</div>
           <div className="header-actions">
             <button className="icon-button" aria-label="Notifications" onClick={() => setTab(tab === 'notifications' ? 'chats' : 'notifications')}><Bell size={18} />{notifications.some((item) => !item.read_at) && <i className="notification-dot" />}</button>
             <button className="icon-button" aria-label="Settings" onClick={openSettingsPage}><Settings size={18} /></button>
@@ -1376,6 +1396,7 @@ function App() {
               <Avatar profile={person} online={person.is_online} />
               <span className="contact-copy"><strong>{person.full_name}</strong><small>@{person.username} · {person.user_id} · {person.is_online ? 'Online' : person.last_seen_at ? `Seen ${formatTime(person.last_seen_at)}` : 'Offline'}</small></span>
               <div className="result-actions">
+                <button className="subtle-button profile-view-button" onClick={() => setProfilePreview(person)}>View profile</button>
                 <button className="subtle-button friend-request-button" disabled={isFriend || Boolean(request) || Boolean(friendRequestBusy)} onClick={() => sendFriendRequest(person)}>{friendRequestBusy === person.id ? 'Sending…' : isFriend ? 'Friends' : requestLabel}</button>
                 <button className="primary-button result-message" onClick={() => openDirect(person)}>Message</button>
               </div>
@@ -1516,6 +1537,7 @@ function App() {
             <button className="subtle-button danger-action" onClick={() => blockUser(activeMember.id)}>Block user</button>
           </div>}
       </aside>}
+      {profilePreview && <PublicProfileModal profile={profilePreview} onClose={() => setProfilePreview(null)} onMessage={(person) => { setProfilePreview(null); openDirect(person) }} />}
       {showGroup && <GroupModal friends={friends} onClose={() => setShowGroup(false)} onCreate={createGroup} busy={busy} />}
       {toast && <div className="toast"><span className="toast-check"><Check size={14} /></span>{toast}</div>}
       <nav className="mobile-bottom-nav" aria-label="Mobile navigation">
@@ -1525,6 +1547,39 @@ function App() {
         <button onClick={openSettingsPage}><Settings size={19} /><span>Settings</span></button>
       </nav>
     </main>
+  )
+}
+
+function PublicProfileModal({ profile, onClose, onMessage }) {
+  const status = profile.is_online
+    ? 'Online now'
+    : profile.last_seen_at
+      ? `Last seen ${formatTime(profile.last_seen_at)}`
+      : 'Offline'
+
+  return (
+    <div className="modal-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose() }}>
+      <section className="profile-modal public-profile-modal" role="dialog" aria-modal="true" aria-labelledby="public-profile-title">
+        <header className="modal-header">
+          <div><h2 id="public-profile-title">Profile</h2><p>Public profile details</p></div>
+          <button className="icon-button" aria-label="Close profile" onClick={onClose}><X size={18} /></button>
+        </header>
+        <div className="public-profile-identity">
+          <Avatar profile={profile} size="xl" online={profile.is_online} />
+          <strong>{profile.full_name}</strong>
+          <span>@{profile.username}</span>
+          <small>{status}</small>
+        </div>
+        <div className="public-profile-details">
+          <div><small>CHATTER ID</small><strong>{profile.user_id}</strong></div>
+          <div><small>ABOUT</small><p>{profile.bio || 'This person has not added a bio yet.'}</p></div>
+        </div>
+        <footer className="modal-actions">
+          <button className="subtle-button" onClick={onClose}>Close</button>
+          <button className="primary-button" onClick={() => onMessage(profile)}><MessageCircle size={16} />Message</button>
+        </footer>
+      </section>
+    </div>
   )
 }
 
@@ -1673,7 +1728,7 @@ function SettingsModal({ profile, email, blockedUsers, onUnblock, onDeleteAccoun
               if (!event.target.checked) { setNotificationSoundEnabled(false); return }
               if (await enableNotificationSound()) setNotificationSoundEnabled(true)
             }} /></label>
-            <div className="settings-info-card"><Bell size={17} /><span>Desktop notifications appear only while Chatter is open and browser permission is enabled.</span></div>
+            <div className="settings-info-card"><Bell size={17} /><span>Desktop notifications appear only while Anveshan Chatter is open and browser permission is enabled.</span></div>
           </div>}
           {section === 'appearance' && <div className="settings-options">
             <div className="setting-option"><span><strong>Theme</strong><small>Choose the appearance used on this device.</small></span><div className="theme-choice"><button className={theme === 'light' ? 'theme-choice-selected' : ''} onClick={() => setTheme('light')}><span className="theme-preview theme-preview-light" />Light</button><button className={theme === 'dark' ? 'theme-choice-selected' : ''} onClick={() => setTheme('dark')}><span className="theme-preview theme-preview-dark" />Dark</button></div></div>
@@ -1687,7 +1742,7 @@ function SettingsModal({ profile, email, blockedUsers, onUnblock, onDeleteAccoun
           {section === 'account' && <div className="settings-options">
             <div className="account-summary"><Avatar profile={profile} /><span><strong>{profile?.full_name}</strong><small>{email}</small></span></div>
             <div className="settings-info-card"><Info size={17} /><span>Your Chatter ID: <strong>{profile?.user_id}</strong></span></div>
-            <button type="button" className="subtle-button account-signout" onClick={onSignOut}><LogOut size={15} />Sign out of Chatter</button>
+            <button type="button" className="subtle-button account-signout" onClick={onSignOut}><LogOut size={15} />Sign out of Anveshan Chatter</button>
             <div className="account-danger-zone"><strong>Delete account</strong><p>Permanently delete your account, profile, and chat history.</p><button type="button" className="subtle-button danger-action" onClick={onDeleteAccount}>Delete my account</button></div>
           </div>}
         </div>
