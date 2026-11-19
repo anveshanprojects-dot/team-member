@@ -1198,7 +1198,6 @@ function App() {
           <button className={tab === 'chats' ? 'nav-item selected' : 'nav-item'} onClick={() => setTab('chats')}><MessageCircle size={18} />Messages{unreadTotal > 0 && <span className="nav-badge">{unreadTotal}</span>}</button>
           <button className={tab === 'contacts' ? 'nav-item selected' : 'nav-item'} onClick={() => setTab('contacts')}><Users size={18} />People<span className="nav-count">{friends.length}</span></button>
           <button className={tab === 'requests' ? 'nav-item selected' : 'nav-item'} onClick={() => setTab('requests')}><ArrowDown size={18} />Requests{requests.length > 0 && <span className="nav-badge">{requests.length}</span>}</button>
-          <button className={tab === 'notifications' ? 'nav-item selected' : 'nav-item'} onClick={() => setTab('notifications')}><Bell size={18} />Activity{notifications.some((item) => !item.read_at) && <i className="nav-dot" />}</button>
         </nav>
         <div className="list-heading"><span>{tab === 'chats' ? 'CHATS' : tab === 'contacts' ? 'TEAM CONTACTS' : tab === 'requests' ? 'INCOMING REQUESTS' : tab === 'search' ? 'FIND TEAMMATES' : tab === 'notifications' ? 'RECENT ACTIVITY' : 'CHATS'}</span>{tab === 'chats' && <button className="icon-button small-icon" onClick={() => setShowGroup(true)} title="Create a group"><Plus size={17} /></button>}</div>
         <div className="sidebar-list">
@@ -1326,7 +1325,13 @@ function App() {
       }} theme={theme} setTheme={setTheme} notify={notify} notificationsEnabled={notificationsEnabled} setNotificationsEnabled={setNotificationsEnabled} notificationSoundEnabled={notificationSoundEnabled} setNotificationSoundEnabled={setNotificationSoundEnabled} enableNotificationSound={enableNotificationSound} />}
       {showGroup && <GroupModal friends={friends} onClose={() => setShowGroup(false)} onCreate={createGroup} busy={busy} />}
       {toast && <div className="toast"><span className="toast-check"><Check size={14} /></span>{toast}</div>}
-      <nav className="mobile-bottom-nav"><button onClick={() => { setTab('chats'); setActiveId(null) }} className={tab === 'chats' ? 'mobile-nav-selected' : ''}><MessageCircle size={19} /><span>Chats</span></button><button onClick={() => { setTab('contacts'); setActiveId(null) }} className={tab === 'contacts' ? 'mobile-nav-selected' : ''}><Users size={19} /><span>People</span></button><button onClick={() => { setTab('search'); setActiveId(null) }} className={tab === 'search' ? 'mobile-nav-selected' : ''}><Search size={19} /><span>Discover</span></button><button onClick={() => setShowSettings(true)}><Settings size={19} /><span>Settings</span></button></nav>
+      <nav className="mobile-bottom-nav" aria-label="Mobile navigation">
+        <button onClick={() => { setTab('chats'); setActiveId(null) }} className={tab === 'chats' ? 'mobile-nav-selected' : ''}><MessageCircle size={19} /><span>Chats</span>{unreadTotal > 0 && <i className="mobile-nav-badge">{unreadTotal}</i>}</button>
+        <button onClick={() => { setTab('contacts'); setActiveId(null) }} className={tab === 'contacts' ? 'mobile-nav-selected' : ''}><Users size={19} /><span>People</span></button>
+        <button onClick={() => { setTab('requests'); setActiveId(null) }} className={tab === 'requests' ? 'mobile-nav-selected' : ''}><ArrowDown size={19} /><span>Requests</span>{requests.length > 0 && <i className="mobile-nav-badge">{requests.length}</i>}</button>
+        <button onClick={() => { setTab('search'); setActiveId(null) }} className={tab === 'search' ? 'mobile-nav-selected' : ''}><Compass size={19} /><span>Discover</span></button>
+        <button onClick={() => setShowSettings(true)}><Settings size={19} /><span>Settings</span></button>
+      </nav>
     </main>
   )
 }
