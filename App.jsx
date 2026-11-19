@@ -1476,7 +1476,46 @@ function App() {
           <span className="welcome-tip"><span>✦</span> Your conversations are private to the people in each chat.</span>
         </div>}
       </section>
-      {showInfo && activeConversation && <aside className="info-panel"><header><strong>Details</strong><button className="icon-button" onClick={() => setShowInfo(false)}><X size={18} /></button></header><div className="info-person">{activeConversation.is_group ? <span className="group-avatar group-avatar-xl"><Users size={25} /></span> : <Avatar profile={activeMember} size="xl" online={activeMember?.is_online} />}<strong>{activeTitle}</strong><span>{activeConversation.is_group ? `Group · ${activeConversation.members?.length || 0} members` : `@${activeMember?.username}`}</span>{!activeConversation.is_group && activeMember?.user_id && <><small>Chatter ID · {activeMember.user_id}</small><small>{activeMember.is_online ? 'Online now' : activeStatus?.last_seen_at ? `Last seen ${formatTime(activeStatus.last_seen_at)}` : 'Offline'}</small></>}</div>{activeConversation.is_group && <div className="info-members"><h4>MEMBERS</h4>{activeConversation.members?.map((member) => <div key={member.id}><Avatar profile={member} size="small" online={member.is_online} /><span>{member.full_name}<small>{member.id === session.user.id ? 'You' : `@${member.username}`} {member.role === 'admin' ? '· Admin' : ''}</small></span>{activeConversation.members.find((item) => item.id === session.user.id)?.role === 'admin' && member.id !== session.user.id && <><button className="text-button" onClick={() => promoteGroupMember(member.id)}>Make admin</button><button className="text-button" onClick={() => removeGroupMember(member.id)}>Remove</button></>}</div>)}{activeConversation.members.find((item) => item.id === session.user.id)?.role === 'admin' && friends.filter((friend) => !activeConversation.members.some((member) => member.id === friend.id)).length > 0 && <div className="info-add-members">{friends.filter((friend) => !activeConversation.members.some((member) => member.id === friend.id)).map((friend) => <button key={friend.id} className="text-button" onClick={() => addGroupMember(friend.id)}><Plus size={13} />Add {friend.full_name}</button>)}</div>}</div>}{activeConversation.is_group ? <div className="info-meta group-admin-actions"><p>{activeConversation.description || 'No group description yet.'}</p><button className="subtle-button" onClick={() => renameGroup(activeConversation)}>Rename group</button>{activeConversation.members.find((item) => item.id === session.user.id)?.role === 'admin' && <button className="subtle-button" onClick={() => editGroupDescription(activeConversation)}>Edit description</button>}<button className="subtle-button" onClick={() => removeGroupMember(session.user.id)}>Leave group</button>{activeConversation.created_by === session.user.id && <button className="subtle-button danger-action" onClick={() => deleteGroup(activeConversation)}>Delete group</button>}</div> : <div className="info-meta"><span><Info size={16} />About</span><p>{activeMember?.bio || 'Making room for good conversations.'}</p><button className="subtle-button danger-action" onClick={() => blockUser(activeMember.id)}>Block user</button></div>}</aside>}
+      {showInfo && activeConversation && <aside className="info-panel">
+        <header><strong>Details</strong><button className="icon-button" onClick={() => setShowInfo(false)}><X size={18} /></button></header>
+        <div className="info-person">
+          {activeConversation.is_group ? <span className="group-avatar group-avatar-xl"><Users size={25} /></span> : <Avatar profile={activeMember} size="xl" online={activeMember?.is_online} />}
+          <strong>{activeTitle}</strong>
+          <span>{activeConversation.is_group ? `Group · ${activeConversation.members?.length || 0} members` : `@${activeMember?.username}`}</span>
+          {!activeConversation.is_group && activeMember?.user_id && <>
+            <small>Chatter ID · {activeMember.user_id}</small>
+            <small>{activeMember.is_online ? 'Online now' : activeStatus?.last_seen_at ? `Last seen ${formatTime(activeStatus.last_seen_at)}` : 'Offline'}</small>
+          </>}
+        </div>
+        {activeConversation.is_group && <div className="info-members">
+          <h4>MEMBERS</h4>
+          {activeConversation.members?.map((member) => <div key={member.id}>
+            <Avatar profile={member} size="small" online={member.is_online} />
+            <span>{member.full_name}<small>{member.id === session.user.id ? 'You' : `@${member.username}`} {member.role === 'admin' ? '· Admin' : ''}</small></span>
+            {activeConversation.members.find((item) => item.id === session.user.id)?.role === 'admin' && member.id !== session.user.id && <>
+              <button className="text-button" onClick={() => promoteGroupMember(member.id)}>Make admin</button>
+              <button className="text-button" onClick={() => removeGroupMember(member.id)}>Remove</button>
+            </>}
+          </div>)}
+          {activeConversation.members.find((item) => item.id === session.user.id)?.role === 'admin' && friends.filter((friend) => !activeConversation.members.some((member) => member.id === friend.id)).length > 0 && <div className="info-add-members">
+            {friends.filter((friend) => !activeConversation.members.some((member) => member.id === friend.id)).map((friend) => <button key={friend.id} className="text-button" onClick={() => addGroupMember(friend.id)}><Plus size={13} />Add {friend.full_name}</button>)}
+          </div>}
+        </div>}
+        {activeConversation.is_group
+          ? <div className="info-meta group-admin-actions">
+            <p>{activeConversation.description || 'No group description yet.'}</p>
+            <button className="subtle-button" onClick={() => renameGroup(activeConversation)}>Rename group</button>
+            {activeConversation.members.find((item) => item.id === session.user.id)?.role === 'admin' && <button className="subtle-button" onClick={() => editGroupDescription(activeConversation)}>Edit description</button>}
+            <button className="subtle-button" onClick={() => removeGroupMember(session.user.id)}>Leave group</button>
+            {activeConversation.created_by === session.user.id && <button className="subtle-button danger-action" onClick={() => deleteGroup(activeConversation)}>Delete group</button>}
+          </div>
+          : <div className="info-meta">
+            <span><Info size={16} />About</span>
+            <p>{activeMember?.bio || 'Making room for good conversations.'}</p>
+            {friends.some((friend) => friend.id === activeMember?.id) && <button className="subtle-button danger-action" onClick={() => removeFriend(activeMember)}>Unfriend</button>}
+            <button className="subtle-button danger-action" onClick={() => blockUser(activeMember.id)}>Block user</button>
+          </div>}
+      </aside>}
       {showGroup && <GroupModal friends={friends} onClose={() => setShowGroup(false)} onCreate={createGroup} busy={busy} />}
       {toast && <div className="toast"><span className="toast-check"><Check size={14} /></span>{toast}</div>}
       <nav className="mobile-bottom-nav" aria-label="Mobile navigation">
