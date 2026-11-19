@@ -8,7 +8,8 @@ A responsive real-time messaging application built with React, Vite, Supabase Au
 - Unique usernames and generated Chatter IDs; exact username/ID discovery subject to account privacy.
 - Profile editing, profile photos, privacy controls, and light/dark appearance.
 - Friend requests, incoming-request actions, contacts, and direct conversations.
-- Realtime text messages, typing indicators, replies, message editing/deletion, reactions, forwarding, read receipts, and unread counters.
+- Realtime text messages, typing indicators, replies, message editing/deletion, reactions, forwarding, pinning, copy, read receipts, and unread counters, with older history loaded in pages.
+- Password reset links let users securely set and confirm a new password.
 - Group creation with selected friends, group details, and member lists.
 - Private chat-file uploads and public profile photos, with size/type restrictions and Storage policies.
 - Realtime activity notifications for messages and incoming friend requests.
@@ -30,6 +31,8 @@ A responsive real-time messaging application built with React, Vite, Supabase Au
 2. In your Supabase project, open **SQL Editor**, paste the contents of [`supabase/schema.sql`](./supabase/schema.sql), and run it using a project owner account.
 
    If email/password login works but Chatter shows a database setup screen or a `PGRST205` error, the Auth service is connected but the app tables have not been installed. Run this SQL step against the same Supabase project configured in `.env`, then use **Retry database connection** in the app.
+
+   If the existing database is already installed, do not rerun the full schema. Apply [`supabase/migrations/20261119000000_chat_performance_and_message_pins.sql`](./supabase/migrations/20261119000000_chat_performance_and_message_pins.sql) in SQL Editor before deploying this version. It adds a membership-checked pin RPC and a private conversation-summary RPC, without replacing existing data.
 
 3. Install the Supabase CLI, authenticate, link your project, and deploy the Edge Functions:
 
