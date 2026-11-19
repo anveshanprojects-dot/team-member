@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   ArrowLeft, ArrowUpRight, Bell, Check, CheckCheck,
-  CircleHelp, Compass, Copy, File, FileText, Image, Info, LogOut, Menu, MessageCircle, MoreHorizontal, Pin,
+  CircleHelp, Copy, File, FileText, Image, Info, LogOut, Menu, MessageCircle, MoreHorizontal, Pin,
   Mic, Paperclip, Plus, Search, Send, Settings, Smile, Trash2, UserRound, Users, X,
 } from 'lucide-react'
 import { createClient } from '@supabase/supabase-js'
@@ -1258,6 +1258,7 @@ function App() {
   const appClass = `app-shell ${activeConversation ? 'conversation-open' : ''}`
   const pinnedConversations = filteredConversations.filter((conversation) => pinnedConversationIds.includes(conversation.id))
   const recentConversations = filteredConversations.filter((conversation) => !pinnedConversationIds.includes(conversation.id))
+  const groupConversations = filteredConversations.filter((conversation) => conversation.is_group)
 
   function togglePinnedConversation(conversationId) {
     const nextPins = pinnedConversationIds.includes(conversationId)
@@ -1300,7 +1301,6 @@ function App() {
         <header className="sidebar-header">
           <div className="brand"><span className="brand-mark"><MessageCircle size={21} /></span> chatter</div>
           <div className="header-actions">
-            <button className="icon-button mobile-only" aria-label="Close menu" onClick={() => setShowMobileMenu(false)}><X size={19} /></button>
             <button className="icon-button" aria-label="Notifications" onClick={() => setTab(tab === 'notifications' ? 'chats' : 'notifications')}><Bell size={18} />{notifications.some((item) => !item.read_at) && <i className="notification-dot" />}</button>
             <button className="icon-button" aria-label="Settings" onClick={openSettingsPage}><Settings size={18} /></button>
           </div>
@@ -1314,11 +1314,11 @@ function App() {
           {query && <button type="button" className="clear-search" onClick={() => setQuery('')}><X size={14} /></button>}
         </form>
         <nav className="main-nav" aria-label="Main navigation">
-          <button className={tab === 'search' ? 'nav-item selected' : 'nav-item'} onClick={() => setTab('search')}><Compass size={18} />Discover</button>
+          <button className={tab === 'groups' ? 'nav-item selected' : 'nav-item'} onClick={() => setTab('groups')}><Users size={18} />Groups</button>
           <button className={tab === 'chats' ? 'nav-item selected' : 'nav-item'} onClick={() => setTab('chats')}><MessageCircle size={18} />Messages{unreadTotal > 0 && <span className="nav-badge">{unreadTotal}</span>}</button>
-          <button className={tab === 'contacts' ? 'nav-item selected' : 'nav-item'} onClick={() => setTab('contacts')}><Users size={18} />People<span className="nav-count">{friends.length}</span></button>
+          <button className={tab === 'contacts' ? 'nav-item selected' : 'nav-item'} onClick={() => setTab('contacts')}><UserRound size={18} />People<span className="nav-count">{friends.length}</span></button>
         </nav>
-        <div className="list-heading"><span>{tab === 'chats' ? 'CHATS' : tab === 'contacts' ? 'PEOPLE' : tab === 'search' ? 'FIND TEAMMATES' : tab === 'notifications' ? 'RECENT ACTIVITY' : 'CHATS'}</span>{tab === 'chats' && <button className="icon-button small-icon" onClick={() => setShowGroup(true)} title="Create a group"><Plus size={17} /></button>}</div>
+        <div className="list-heading"><span>{tab === 'chats' ? 'CHATS' : tab === 'groups' ? 'GROUPS' : tab === 'contacts' ? 'PEOPLE' : tab === 'search' ? 'FIND TEAMMATES' : tab === 'notifications' ? 'RECENT ACTIVITY' : 'CHATS'}</span>{(tab === 'chats' || tab === 'groups') && <button className="icon-button small-icon" onClick={() => setShowGroup(true)} title="Create a group"><Plus size={17} /></button>}</div>
         <div className="sidebar-list">
           {tab === 'chats' && (filteredConversations.length ? <>
             {pinnedConversations.length > 0 && <section className="chat-list-section">
@@ -1332,6 +1332,9 @@ function App() {
                 : <div className="pinned-only-note">All conversations are pinned.</div>}
             </section>
           </> : <div className="empty-sidebar"><div className="empty-icon"><MessageCircle size={20} /></div><strong>{query ? 'No conversations found' : 'A quiet inbox'}</strong><span>{query ? 'Try another search.' : 'Find someone and start chatting.'}</span><button className="text-button" onClick={() => setTab('search')}>Find people <ArrowUpRight size={14} /></button></div>)}
+          {tab === 'groups' && (groupConversations.length
+            ? groupConversations.map(renderConversationRow)
+            : <div className="empty-sidebar"><div className="empty-icon"><Users size={20} /></div><strong>{query ? 'No groups found' : 'No groups yet'}</strong><span>{query ? 'Try another search.' : 'Create a group to bring your people together.'}</span><button className="text-button" onClick={() => setShowGroup(true)}>Create a group <Plus size={14} /></button></div>)}
           {tab === 'contacts' && <>
             {friendRequests.some((request) => request.status === 'pending' && request.receiver_id === session.user.id) && <section className="people-request-section">
               <h3 className="people-section-heading">Friend requests</h3>
@@ -1477,9 +1480,9 @@ function App() {
       {showGroup && <GroupModal friends={friends} onClose={() => setShowGroup(false)} onCreate={createGroup} busy={busy} />}
       {toast && <div className="toast"><span className="toast-check"><Check size={14} /></span>{toast}</div>}
       <nav className="mobile-bottom-nav" aria-label="Mobile navigation">
-        <button onClick={() => { setTab('chats'); setActiveId(null) }} className={tab === 'chats' ? 'mobile-nav-selected' : ''}><MessageCircle size={19} /><span>Chats</span>{unreadTotal > 0 && <i className="mobile-nav-badge">{unreadTotal}</i>}</button>
-        <button onClick={() => { setTab('contacts'); setActiveId(null) }} className={tab === 'contacts' ? 'mobile-nav-selected' : ''}><Users size={19} /><span>People</span></button>
-        <button onClick={() => { setTab('search'); setActiveId(null) }} className={tab === 'search' ? 'mobile-nav-selected' : ''}><Compass size={19} /><span>Discover</span></button>
+        <button onClick={() => { setTab('chats'); setActiveId(null); setShowMobileMenu(false) }} className={tab === 'chats' ? 'mobile-nav-selected' : ''}><MessageCircle size={19} /><span>Chats</span>{unreadTotal > 0 && <i className="mobile-nav-badge">{unreadTotal}</i>}</button>
+        <button onClick={() => { setTab('contacts'); setActiveId(null); setShowMobileMenu(false) }} className={tab === 'contacts' ? 'mobile-nav-selected' : ''}><Users size={19} /><span>People</span></button>
+        <button onClick={() => { setTab('groups'); setActiveId(null); setShowMobileMenu(false) }} className={tab === 'groups' ? 'mobile-nav-selected' : ''}><Users size={19} /><span>Groups</span></button>
         <button onClick={openSettingsPage}><Settings size={19} /><span>Settings</span></button>
       </nav>
     </main>
