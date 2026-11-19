@@ -257,6 +257,16 @@ function App() {
 
   const activeConversation = conversations.find((conversation) => conversation.id === activeId)
   const activeMember = activeConversation?.members?.find((member) => member.id !== session?.user?.id)
+  const activeMemberIsFriend = Boolean(activeMember && friends.some((friend) => friend.id === activeMember.id))
+  const activeMemberRequest = activeMember && friendRequests.find((request) =>
+    (request.sender_id === session?.user?.id && request.receiver_id === activeMember.id) ||
+    (request.sender_id === activeMember.id && request.receiver_id === session?.user?.id)
+  )
+  const profilePreviewIsFriend = Boolean(profilePreview && friends.some((friend) => friend.id === profilePreview.id))
+  const profilePreviewRequest = profilePreview && friendRequests.find((request) =>
+    (request.sender_id === session?.user?.id && request.receiver_id === profilePreview.id) ||
+    (request.sender_id === profilePreview.id && request.receiver_id === session?.user?.id)
+  )
   const latestMessageId = messages.at(-1)?.id
   const firstUnreadMessageId = messages.find((message) =>
     message.sender_id !== session?.user?.id &&
@@ -1388,16 +1398,22 @@ function App() {
               (item.sender_id === session.user.id && item.receiver_id === person.id) ||
               (item.sender_id === person.id && item.receiver_id === session.user.id)
             )
-            const requestLabel = request?.status === 'pending'
-              ? request.sender_id === session.user.id ? 'Request sent' : 'Respond in People'
-              : request?.status === 'rejected' ? 'Request declined'
-                : request?.status === 'cancelled' ? 'Request cancelled' : 'Add friend'
             return <div className="search-result" key={person.id}>
               <Avatar profile={person} online={person.is_online} />
               <span className="contact-copy"><strong>{person.full_name}</strong><small>@{person.username} · {person.user_id} · {person.is_online ? 'Online' : person.last_seen_at ? `Seen ${formatTime(person.last_seen_at)}` : 'Offline'}</small></span>
               <div className="result-actions">
                 <button className="subtle-button profile-view-button" onClick={() => setProfilePreview(person)}>View profile</button>
-                <button className="subtle-button friend-request-button" disabled={isFriend || Boolean(request) || Boolean(friendRequestBusy)} onClick={() => sendFriendRequest(person)}>{friendRequestBusy === person.id ? 'Sending…' : isFriend ? 'Friends' : requestLabel}</button>
+                <FriendshipActions
+                  className="search-friendship-actions"
+                  person={person}
+                  isFriend={isFriend}
+                  request={request}
+                  currentUserId={session.user.id}
+                  busy={friendRequestBusy}
+                  onSend={sendFriendRequest}
+                  onRespond={respondFriendRequest}
+                  onUnfriend={removeFriend}
+                />
                 <button className="primary-button result-message" onClick={() => openDirect(person)}>Message</button>
               </div>
             </div>
@@ -1533,11 +1549,32 @@ function App() {
           : <div className="info-meta">
             <span><Info size={16} />About</span>
             <p>{activeMember?.bio || 'Making room for good conversations.'}</p>
-            {friends.some((friend) => friend.id === activeMember?.id) && <button className="subtle-button danger-action" onClick={() => removeFriend(activeMember)}>Unfriend</button>}
+            {activeMember && <FriendshipActions
+              className="people-detail-actions"
+              person={activeMember}
+              isFriend={activeMemberIsFriend}
+              request={activeMemberRequest}
+              currentUserId={session.user.id}
+              busy={friendRequestBusy}
+              onSend={sendFriendRequest}
+              onRespond={respondFriendRequest}
+              onUnfriend={removeFriend}
+            />}
             <button className="subtle-button danger-action" onClick={() => blockUser(activeMember.id)}>Block user</button>
           </div>}
       </aside>}
-      {profilePreview && <PublicProfileModal profile={profilePreview} onClose={() => setProfilePreview(null)} onMessage={(person) => { setProfilePreview(null); openDirect(person) }} />}
+      {profilePreview && <PublicProfileModal
+        profile={profilePreview}
+        isFriend={profilePreviewIsFriend}
+        request={profilePreviewRequest}
+        currentUserId={session.user.id}
+        busy={friendRequestBusy}
+        onSend={sendFriendRequest}
+        onRespond={respondFriendRequest}
+        onUnfriend={removeFriend}
+        onClose={() => setProfilePreview(null)}
+        onMessage={(person) => { setProfilePreview(null); openDirect(person) }}
+      />}
       {showGroup && <GroupModal friends={friends} onClose={() => setShowGroup(false)} onCreate={createGroup} busy={busy} />}
       {toast && <div className="toast"><span className="toast-check"><Check size={14} /></span>{toast}</div>}
       <nav className="mobile-bottom-nav" aria-label="Mobile navigation">
@@ -1550,7 +1587,7 @@ function App() {
   )
 }
 
-function PublicProfileModal({ profile, onClose, onMessage }) {
+function PublicProfileModal({ profile, isFriend, request, currentUserId, busy, onSend, onRespond, onUnfriend, onClose, onMessage }) {
   const status = profile.is_online
     ? 'Online now'
     : profile.last_seen_at
@@ -1574,6 +1611,17 @@ function PublicProfileModal({ profile, onClose, onMessage }) {
           <div><small>CHATTER ID</small><strong>{profile.user_id}</strong></div>
           <div><small>ABOUT</small><p>{profile.bio || 'This person has not added a bio yet.'}</p></div>
         </div>
+        <FriendshipActions
+          className="profile-friend-actions"
+          person={profile}
+          isFriend={isFriend}
+          request={request}
+          currentUserId={currentUserId}
+          busy={busy}
+          onSend={onSend}
+          onRespond={onRespond}
+          onUnfriend={onUnfriend}
+        />
         <footer className="modal-actions">
           <button className="subtle-button" onClick={onClose}>Close</button>
           <button className="primary-button" onClick={() => onMessage(profile)}><MessageCircle size={16} />Message</button>
@@ -1581,6 +1629,42 @@ function PublicProfileModal({ profile, onClose, onMessage }) {
       </section>
     </div>
   )
+}
+
+function FriendshipActions({ person, isFriend, request, currentUserId, busy, onSend, onRespond, onUnfriend, className = '' }) {
+  const isBusy = busy === person.id || Boolean(request && busy === request.id)
+
+  if (isFriend) {
+    return <div className={`friendship-actions ${className}`}>
+      <button className="subtle-button danger-action" disabled={isBusy} onClick={() => onUnfriend(person)}>
+        {isBusy ? 'Working…' : 'Unfriend'}
+      </button>
+    </div>
+  }
+
+  if (request?.status === 'pending' && request.receiver_id === currentUserId) {
+    return <div className={`friendship-actions ${className}`}>
+      <button className="primary-button" disabled={isBusy} onClick={() => onRespond(request, true)}>{isBusy ? 'Working…' : 'Accept request'}</button>
+      <button className="subtle-button" disabled={isBusy} onClick={() => onRespond(request, false)}>Reject</button>
+    </div>
+  }
+
+  if (request?.status === 'pending') {
+    return <div className={`friendship-actions ${className}`}>
+      <button className="subtle-button" disabled>Request sent</button>
+    </div>
+  }
+
+  if (request) {
+    const status = request.status === 'rejected' ? 'Request declined' : 'Request unavailable'
+    return <div className={`friendship-actions ${className}`}>
+      <button className="subtle-button" disabled>{status}</button>
+    </div>
+  }
+
+  return <div className={`friendship-actions ${className}`}>
+    <button className="primary-button" disabled={isBusy} onClick={() => onSend(person)}>{isBusy ? 'Sending…' : 'Add friend'}</button>
+  </div>
 }
 
 function SettingsModal({ profile, email, blockedUsers, onUnblock, onDeleteAccount, onClose, onSignOut, onSave, theme, setTheme, notify, notificationsEnabled, setNotificationsEnabled, notificationSoundEnabled, setNotificationSoundEnabled, enableNotificationSound, standalone = false }) {

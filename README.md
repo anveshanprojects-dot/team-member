@@ -1,17 +1,21 @@
-# Chatter
+# Anveshan Chatter
 
 A responsive real-time messaging application built with React, Vite, Supabase Auth, Postgres, Realtime, and Storage.
 
 ## What is implemented
 
 - Email/password sign-up and sign-in; sign-in accepts email or username. Supabase Auth handles password hashing, persistent sessions, verification, logout, and password reset.
-- Unique usernames and generated Chatter IDs; exact username/ID discovery subject to account privacy.
-- Profile editing, profile photos, privacy controls, and light/dark appearance.
-- Friend requests, incoming-request actions, contacts, and direct conversations.
+- Google sign-in through Supabase OAuth when the Google provider is enabled and configured in the Supabase project.
+- Unique usernames and generated Chatter IDs; search for users from the workspace search bar, subject to account privacy.
+- Search results include a profile preview populated only from the privacy-aware `search_profiles` RPC.
+- Profile editing and profile photos in Settings, plus privacy controls and light/dark appearance.
+- Settings opens in a separate browser tab as a full-page view, with a back-to-chat control.
+- Direct messages can start with any discoverable user. Friend requests can be sent, accepted, and rejected from search results and person details; accepted requests create contacts for both users.
+- Friends can be unfriended from People, search results, and person details. Chats can be removed from your inbox without deleting the other participant’s history; leaving a group removes you from that group.
 - Pinned and recent conversation sections; pinned chats are saved per user in the current browser.
 - Realtime text messages, typing indicators, replies, message editing/deletion, reactions, forwarding, pinning, copy, read receipts, and unread counters, with older history loaded in pages.
 - Password reset links let users securely set and confirm a new password.
-- Group creation with selected friends, group details, and member lists.
+- A Groups navigation section lists group conversations; groups can be created with selected friends and include group details and member lists.
 - Private chat-file uploads and public profile photos, with size/type restrictions and Storage policies.
 - Realtime activity notifications update the activity list and badge without interrupting the chat; optional browser notifications are silent.
 - Optional short notification chime can be enabled or muted in Settings; notification IDs are deduplicated.
@@ -50,6 +54,7 @@ A responsive real-time messaging application built with React, Vite, Supabase Au
    The functions use Supabase's `SUPABASE_URL`, `SUPABASE_ANON_KEY`, and `SUPABASE_SERVICE_ROLE_KEY` environment values. The service-role key stays server-side in the Edge Functions and must never be added to the frontend. The username-login function delegates password verification to Supabase Auth; the delete-account function requires the caller's authenticated JWT.
 
 4. In **Authentication → URL Configuration**, set the Site URL to your local or deployed application URL and add that URL to the redirect allow list. Configure an email provider and SMTP for production verification and password reset mail.
+   To enable Google sign-in, enable the Google provider in **Authentication → Providers**, set its OAuth client credentials, and configure the Supabase callback URL with the Google OAuth client. The app uses the configured Supabase redirect flow and reports provider errors if Google sign-in is unavailable.
 5. Copy `.env.example` to `.env` and set your project URL and **anon/publishable** key:
 
    ```env
@@ -83,6 +88,8 @@ The project SQL installs the database tables, indexes, profile/signup triggers, 
 
 - Supabase must be configured before the app can authenticate or access data. The source does not include credentials or a hosted backend.
 - Email verification and reset delivery depend on the Supabase Auth provider and SMTP configuration.
+- Google sign-in requires the Google provider and OAuth redirect URLs to be configured in Supabase; it is not available until then.
 - Browser notifications work while the app is open and permission is granted; background Web Push notifications are not included. Group photos and a separate accept/decline flow for group invitations are not exposed in this initial UI.
 - Private attachment downloads use short-lived signed URLs and Storage RLS; chat files are not publicly readable.
+- A protected admin dashboard and conversation archiving are not implemented. The current schema has no trusted platform-admin identity or archive state; adding either safely requires a reviewed database migration and an authorized admin assignment, not a frontend-only role check.
 - Add rate limits and production email controls in Supabase Auth, configure backups, and validate deployment redirect URLs before launch.

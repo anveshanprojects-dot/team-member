@@ -981,3 +981,11 @@ html[data-theme=dark] ::selection { color: #e7eef7; background: #214f79; }
     background-size: 200px 38px;
   }
 }
+
+.result-actions { flex-wrap: wrap; }
+.friendship-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 5px; }
+.search-friendship-actions .primary-button, .search-friendship-actions .subtle-button { min-height: 31px; padding-inline: 8px; font-size: 11px; }
+.people-detail-actions { margin: 12px 0; }
+.people-detail-actions .primary-button, .people-detail-actions .subtle-button { min-height: 35px; padding-inline: 11px; }
+.profile-friend-actions { margin: 16px 0 4px; justify-content: center; }
+.profile-friend-actions .primary-button, .profile-friend-actions .subtle-button { min-height: 36px; padding-inline: 12px; }
