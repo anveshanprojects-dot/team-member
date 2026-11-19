@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
-  ArrowDown, ArrowLeft, ArrowUpRight, Bell, Check, CheckCheck,
+  ArrowLeft, ArrowUpRight, Bell, Check, CheckCheck,
   CircleHelp, Compass, Copy, File, FileText, Image, Info, LogOut, Menu, MessageCircle, MoreHorizontal, Pin,
   Mic, Paperclip, Plus, Search, Send, Settings, Smile, UserRound, Users, X,
 } from 'lucide-react'
@@ -192,7 +192,6 @@ function App() {
   const [activeStatus, setActiveStatus] = useState(null)
   const [friends, setFriends] = useState([])
   const [blockedUsers, setBlockedUsers] = useState([])
-  const [requests, setRequests] = useState([])
   const [notifications, setNotifications] = useState([])
   const [tab, setTab] = useState('chats')
   const [query, setQuery] = useState('')
@@ -361,20 +360,19 @@ function App() {
     } else setProfile(ownProfile)
 
     const [{ data: memberRows, error: convError }, { data: summaryRows, error: summaryError }, { data: friendRows, error: friendError },
-      { data: requestRows, error: requestError }, { data: notificationRows, error: notificationError },
+      { data: notificationRows, error: notificationError },
       { data: blockedRows, error: blockedError }] = await Promise.all([
       supabase.from('conversation_members').select('conversation_id, conversations(id, name, description, is_group, created_by, updated_at, conversation_members(user_id, role, profiles(id, username, full_name, avatar_url, bio, show_online_status)))').eq('user_id', user.id),
       supabase.rpc('get_conversation_summaries'),
       supabase.from('friendships').select('user_id, friend_id, profiles!friendships_friend_id_fkey(id, username, full_name, avatar_url, bio, show_online_status)').eq('user_id', user.id),
-      supabase.from('friend_requests').select('id, sender_id, created_at, profiles!friend_requests_sender_id_fkey(id, username, full_name, avatar_url)').eq('receiver_id', user.id).eq('status', 'pending'),
       supabase.from('notifications').select('*').eq('user_id', user.id).order('created_at', { ascending: false }).limit(25),
       supabase.from('blocked_users').select('blocked_id').eq('blocker_id', user.id),
     ])
-    if ([convError, friendError, requestError, notificationError, blockedError].some((error) => error?.code === 'PGRST205')) {
+    if ([convError, friendError, notificationError, blockedError].some((error) => error?.code === 'PGRST205')) {
       setDatabaseSetupRequired(true)
       return
     }
-    for (const loadError of [convError, friendError, requestError, notificationError, blockedError]) if (loadError) notify(loadError.message)
+    for (const loadError of [convError, friendError, notificationError, blockedError]) if (loadError) notify(loadError.message)
     let availableSummaries = summaryRows || []
     if (summaryError?.code === 'PGRST202') {
       const { data: legacyRows, error: legacyError } = await supabase.from('conversation_members')
@@ -424,7 +422,6 @@ function App() {
       ...row.profiles, is_online: row.profiles.show_online_status && onlineUserIds.current.has(row.profiles.id),
     })).filter(Boolean))
     setBlockedUsers((blockedRows || []).map((row) => row.blocked_id))
-    setRequests(requestRows || [])
     const loadedNotifications = notificationRows || []
     notificationIdsRef.current = new Set(loadedNotifications.map((item) => item.id))
     setNotifications(loadedNotifications)
@@ -450,7 +447,6 @@ function App() {
           }
         }).sort((a, b) => new Date(b.updated_at) - new Date(a.updated_at)))
       })
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'friend_requests', filter: `receiver_id=eq.${session.user.id}` }, () => loadWorkspace())
       .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'notifications', filter: `user_id=eq.${session.user.id}` }, (payload) => {
         if (!payload.new?.id || notificationIdsRef.current.has(payload.new.id)) return
         notificationIdsRef.current.add(payload.new.id)
@@ -825,34 +821,12 @@ function App() {
     setActiveId(data)
   }
 
-  async function sendFriendRequest(person) {
-    const { error } = await supabase.from('friend_requests').insert({ sender_id: session.user.id, receiver_id: person.id })
-    if (error) notify(error.code === '23505' ? 'A request already exists between these accounts.' : error.message)
-    else notify(`Friend request sent to ${person.full_name}.`)
-  }
-
   async function removeFriend(person) {
     if (!window.confirm(`Remove ${person.full_name} from your contacts?`)) return
     const { error } = await supabase.rpc('remove_friend', { other_user: person.id })
     if (error) { notify(error.message); return }
     notify('Contact removed.')
     await loadWorkspace()
-  }
-
-  async function respondRequest(request, accept) {
-    setBusy(true)
-    if (accept) {
-      const { error } = await supabase.rpc('accept_friend_request', { request_id: request.id })
-      if (error) { notify(error.message); setBusy(false); return }
-      notify('Friend request accepted.')
-      await loadWorkspace()
-      setBusy(false)
-      return
-    }
-    const { error } = await supabase.from('friend_requests').update({ status: accept ? 'accepted' : 'rejected' }).eq('id', request.id)
-    if (error) notify(error.message)
-    else { notify('Request declined.'); loadWorkspace() }
-    setBusy(false)
   }
 
   async function createGroup(name, members) {
@@ -1240,9 +1214,8 @@ function App() {
           <button className={tab === 'search' ? 'nav-item selected' : 'nav-item'} onClick={() => setTab('search')}><Compass size={18} />Discover</button>
           <button className={tab === 'chats' ? 'nav-item selected' : 'nav-item'} onClick={() => setTab('chats')}><MessageCircle size={18} />Messages{unreadTotal > 0 && <span className="nav-badge">{unreadTotal}</span>}</button>
           <button className={tab === 'contacts' ? 'nav-item selected' : 'nav-item'} onClick={() => setTab('contacts')}><Users size={18} />People<span className="nav-count">{friends.length}</span></button>
-          <button className={tab === 'requests' ? 'nav-item selected' : 'nav-item'} onClick={() => setTab('requests')}><ArrowDown size={18} />Requests{requests.length > 0 && <span className="nav-badge">{requests.length}</span>}</button>
         </nav>
-        <div className="list-heading"><span>{tab === 'chats' ? 'CHATS' : tab === 'contacts' ? 'TEAM CONTACTS' : tab === 'requests' ? 'INCOMING REQUESTS' : tab === 'search' ? 'FIND TEAMMATES' : tab === 'notifications' ? 'RECENT ACTIVITY' : 'CHATS'}</span>{tab === 'chats' && <button className="icon-button small-icon" onClick={() => setShowGroup(true)} title="Create a group"><Plus size={17} /></button>}</div>
+        <div className="list-heading"><span>{tab === 'chats' ? 'CHATS' : tab === 'contacts' ? 'TEAM CONTACTS' : tab === 'search' ? 'FIND TEAMMATES' : tab === 'notifications' ? 'RECENT ACTIVITY' : 'CHATS'}</span>{tab === 'chats' && <button className="icon-button small-icon" onClick={() => setShowGroup(true)} title="Create a group"><Plus size={17} /></button>}</div>
         <div className="sidebar-list">
           {tab === 'chats' && (filteredConversations.length ? <>
             {pinnedConversations.length > 0 && <section className="chat-list-section">
@@ -1257,8 +1230,7 @@ function App() {
             </section>
           </> : <div className="empty-sidebar"><div className="empty-icon"><MessageCircle size={20} /></div><strong>{query ? 'No conversations found' : 'A quiet inbox'}</strong><span>{query ? 'Try another search.' : 'Find someone and start chatting.'}</span><button className="text-button" onClick={() => setTab('search')}>Find people <ArrowUpRight size={14} /></button></div>)}
           {tab === 'contacts' && (friends.length ? friends.map((person) => <div className="contact-row" key={person.id}><button className="contact-open" onClick={() => openDirect(person)}><Avatar profile={person} online={person.is_online} /><span className="contact-copy"><strong>{person.full_name}</strong><small>@{person.username}</small></span><MessageCircle size={17} /></button><button className="contact-remove" title={`Remove ${person.full_name}`} onClick={() => removeFriend(person)}><X size={15} /></button></div>) : <div className="empty-sidebar"><div className="empty-icon"><Users size={20} /></div><strong>Your circle starts here</strong><span>Find people by username or Chatter ID.</span><button className="text-button" onClick={() => setTab('search')}>Find someone <ArrowUpRight size={14} /></button></div>)}
-          {tab === 'requests' && (requests.length ? requests.map((request) => <div className="request-row" key={request.id}><Avatar profile={request.profiles} /><span className="contact-copy"><strong>{request.profiles?.full_name}</strong><small>@{request.profiles?.username}</small></span><div className="request-actions"><button title="Accept request" disabled={busy} onClick={() => respondRequest(request, true)}><Check size={16} /></button><button title="Decline request" disabled={busy} onClick={() => respondRequest(request, false)}><X size={16} /></button></div></div>) : <div className="empty-sidebar"><div className="empty-icon"><ArrowDown size={20} /></div><strong>All caught up</strong><span>New friend requests will show up here.</span></div>)}
-          {tab === 'search' && <><form className="people-search" onSubmit={searchUsers}><Search size={17} /><input autoFocus value={userSearch} onChange={(event) => setUserSearch(event.target.value)} placeholder="Username or Chatter ID" /><button className="primary-button search-submit" disabled={searching}>{searching ? 'Searching…' : 'Search'}</button></form>{searchResults.map((person) => <div className="search-result" key={person.id}><Avatar profile={person} online={person.is_online} /><span className="contact-copy"><strong>{person.full_name}</strong><small>@{person.username} · {person.user_id} · {person.is_online ? 'Online' : person.last_seen_at ? `Seen ${formatTime(person.last_seen_at)}` : 'Offline'}</small></span><div className="result-actions"><button className="subtle-button" onClick={() => sendFriendRequest(person)} title="Add friend"><Plus size={16} /></button><button className="primary-button result-message" onClick={() => openDirect(person)}>Message</button></div></div>)}{!searching && userSearch && !searchResults.length && <div className="empty-sidebar"><strong>No one found</strong><span>Check the spelling or try their exact username or ID.</span></div>}<div className="search-hint"><Info size={14} />Search exact usernames or unique Chatter IDs.</div></>}
+          {tab === 'search' && <><form className="people-search" onSubmit={searchUsers}><Search size={17} /><input autoFocus value={userSearch} onChange={(event) => setUserSearch(event.target.value)} placeholder="Username or Chatter ID" /><button className="primary-button search-submit" disabled={searching}>{searching ? 'Searching…' : 'Search'}</button></form>{searchResults.map((person) => <div className="search-result" key={person.id}><Avatar profile={person} online={person.is_online} /><span className="contact-copy"><strong>{person.full_name}</strong><small>@{person.username} · {person.user_id} · {person.is_online ? 'Online' : person.last_seen_at ? `Seen ${formatTime(person.last_seen_at)}` : 'Offline'}</small></span><div className="result-actions"><button className="primary-button result-message" onClick={() => openDirect(person)}>Message</button></div></div>)}{!searching && userSearch && !searchResults.length && <div className="empty-sidebar"><strong>No one found</strong><span>Check the spelling or try their exact username or ID.</span></div>}<div className="search-hint"><Info size={14} />Search exact usernames or unique Chatter IDs.</div></>}
           {tab === 'notifications' && (notifications.length ? notifications.map((notification) => <div className="activity-row" key={notification.id}><span className="activity-icon"><Bell size={15} /></span><span><strong>{notification.title || 'Chatter update'}</strong><small>{notification.body || notification.type}</small><small>{formatTime(notification.created_at)}</small></span></div>) : <div className="empty-sidebar"><div className="empty-icon"><Bell size={20} /></div><strong>Nothing new</strong><span>Your latest activity will appear here.</span></div>)}
         </div>
         <footer className="sidebar-footer"><div className={`footer-status connection-${connectionStatus}`} role="status" aria-live="polite"><i />{connectionStatus === 'connected' ? 'Connected' : connectionStatus === 'disconnected' ? 'Reconnecting…' : 'Connecting…'}</div><button className="footer-help" onClick={() => notify('Tip: search for a username or Chatter ID to find friends.')}><CircleHelp size={15} /> Help & tips</button></footer>
@@ -1348,7 +1320,6 @@ function App() {
               <div className="workspace-summary">
                 <button onClick={() => setTab('chats')}><MessageCircle size={16} /><span><strong>{conversations.length}</strong><small>Conversations</small></span></button>
                 <button onClick={() => setTab('contacts')}><Users size={16} /><span><strong>{friends.length}</strong><small>Team contacts</small></span></button>
-                <button onClick={() => setTab('requests')}><ArrowDown size={16} /><span><strong>{requests.length}</strong><small>Open requests</small></span></button>
               </div>
             </div>
           </div>
@@ -1361,7 +1332,6 @@ function App() {
       <nav className="mobile-bottom-nav" aria-label="Mobile navigation">
         <button onClick={() => { setTab('chats'); setActiveId(null) }} className={tab === 'chats' ? 'mobile-nav-selected' : ''}><MessageCircle size={19} /><span>Chats</span>{unreadTotal > 0 && <i className="mobile-nav-badge">{unreadTotal}</i>}</button>
         <button onClick={() => { setTab('contacts'); setActiveId(null) }} className={tab === 'contacts' ? 'mobile-nav-selected' : ''}><Users size={19} /><span>People</span></button>
-        <button onClick={() => { setTab('requests'); setActiveId(null) }} className={tab === 'requests' ? 'mobile-nav-selected' : ''}><ArrowDown size={19} /><span>Requests</span>{requests.length > 0 && <i className="mobile-nav-badge">{requests.length}</i>}</button>
         <button onClick={() => { setTab('search'); setActiveId(null) }} className={tab === 'search' ? 'mobile-nav-selected' : ''}><Compass size={19} /><span>Discover</span></button>
         <button onClick={openSettingsPage}><Settings size={19} /><span>Settings</span></button>
       </nav>
