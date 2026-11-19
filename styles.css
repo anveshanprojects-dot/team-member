@@ -650,3 +650,77 @@ html[data-theme=dark] .account-danger-zone { background: #302321; border-color: 
   .chat-header { height: 50px; }
   .composer { min-height: 54px; }
 }
+
+/* Finish with a consistent, restrained workspace visual system. */
+:root {
+  --green: #165c49;
+  --green-2: #18765f;
+  --mint: #55b68b;
+  --ink: #1d2b26;
+  --muted: #74827c;
+  --line: #e8edea;
+  --paper: #fff;
+  --canvas: #f7f9f8;
+  --soft: #f1f5f2;
+  --bubble: #fff;
+  --sent: #e6f4eb;
+  --shadow: 0 18px 55px rgba(23, 45, 35, .12);
+}
+body { background: #f0f3f1; }
+.app-shell { max-width: 1760px; background: var(--paper); box-shadow: 0 0 0 1px rgba(29, 55, 43, .025); }
+.sidebar { background: #fff; }
+.sidebar-header { border-bottom: 1px solid #f1f3f1; }
+.brand { letter-spacing: -.8px; }
+.brand-mark { box-shadow: 0 3px 8px rgba(22, 92, 73, .15); }
+.workspace-switcher { transition: background .16s, border-color .16s, box-shadow .16s; }
+.workspace-switcher:focus-visible, .my-profile:focus-visible { outline: 3px solid rgba(24, 118, 95, .18); outline-offset: 2px; }
+.my-profile { transition: background .16s, border-color .16s; }
+.my-profile:hover { border-color: #e2ebe5; }
+.search-box, .people-search { transition: background .16s, border-color .16s, box-shadow .16s; }
+.search-box:focus-within, .people-search:focus-within { border-color: #a9d2bd; box-shadow: 0 0 0 3px rgba(24, 118, 95, .07); }
+.main-nav { border-bottom-color: #edf1ee; }
+.nav-item { min-height: 36px; border-radius: 7px; }
+.nav-item.selected { color: #15583f; background: #eaf4ed; }
+.conversation-row { margin: 2px 7px; width: calc(100% - 14px); border-radius: 8px; }
+.conversation-selected::before { inset-inline-start: -7px; }
+.contact-row, .search-result, .request-row { border-bottom-color: #edf1ee; }
+.contact-row:hover { border-radius: 8px; }
+.chat-header { box-shadow: 0 1px 3px rgba(28, 54, 42, .025); }
+.chat-person strong { font-weight: 700; }
+.chat-canvas { background-image: radial-gradient(rgba(40, 82, 61, .035) .7px, transparent .7px); background-size: 22px 22px; }
+.message-bubble { border-color: #e9efeb; box-shadow: 0 2px 5px rgba(29, 55, 43, .035); }
+.message-own .message-bubble { background: #e5f4e9; border-color: #d7ecdf; }
+.composer { gap: 9px; }
+.composer-input { border-color: #e8edea; background: #f8faf8; transition: background .16s, border-color .16s, box-shadow .16s; }
+.composer-input:focus-within { border-color: #a9d2bd; box-shadow: 0 0 0 3px rgba(24, 118, 95, .06); }
+.send-button { border-radius: 10px; }
+.info-panel > header, .settings-topbar { background: #fff; }
+.profile-modal, .group-modal, .settings-window { border-color: #e8edea; box-shadow: 0 24px 80px rgba(16, 39, 29, .20); }
+.primary-button { background: var(--green); box-shadow: 0 2px 5px rgba(22, 92, 73, .12); }
+.primary-button:hover:not(:disabled) { background: #104c3c; }
+.subtle-button { transition: border-color .16s, background .16s, color .16s; }
+.subtle-button:hover { border-color: #d5e4dc; background: #f7faf8; }
+.settings-nav-item { border-radius: 7px; transition: background .15s, color .15s; }
+.settings-nav-selected, .settings-nav-selected:hover { color: #15583f; background: #eaf4ed; }
+.setting-option { border-bottom-color: #edf1ee; }
+.toast { box-shadow: 0 10px 30px rgba(15, 36, 27, .2); }
+::selection { color: #113d2c; background: #ccebd8; }
+::-webkit-scrollbar { width: 7px; height: 7px; }
+::-webkit-scrollbar-thumb { border: 2px solid transparent; border-radius: 10px; background: #cdd7d1; background-clip: padding-box; }
+::-webkit-scrollbar-thumb:hover { background: #aebdb4; background-clip: padding-box; }
+html[data-theme=dark] body { background: #101814; }
+html[data-theme=dark] .sidebar-header { border-color: #26352e; }
+html[data-theme=dark] .conversation-row:hover, html[data-theme=dark] .conversation-selected { background: #1e3128; }
+html[data-theme=dark] .message-own .message-bubble { background: #174536; }
+html[data-theme=dark] .subtle-button:hover { color: #e0eee6; background: #263a30; border-color: #40564a; }
+html[data-theme=dark] .settings-nav-selected, html[data-theme=dark] .settings-nav-selected:hover { color: #b6e4c8; background: #234136; }
+
+@media (max-width: 700px) {
+  body { background: var(--paper); }
+  .sidebar-header { border-bottom: 0; }
+  .conversation-row { margin-inline: 5px; width: calc(100% - 10px); }
+  .conversation-selected::before { inset-inline-start: -5px; }
+  .chat-canvas { background-image: none; }
+  .composer { gap: 3px; }
+  .mobile-bottom-nav { box-shadow: 0 -4px 16px rgba(28, 54, 42, .04); }
+}
