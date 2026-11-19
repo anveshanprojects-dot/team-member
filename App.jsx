@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   ArrowLeft, ArrowUpRight, Bell, Check, CheckCheck,
   CircleHelp, Compass, Copy, File, FileText, Image, Info, LogOut, Menu, MessageCircle, MoreHorizontal, Pin,
-  Mic, Paperclip, Plus, Search, Send, Settings, Smile, UserRound, Users, X,
+  Mic, Paperclip, Plus, Search, Send, Settings, Smile, Trash2, UserRound, Users, X,
 } from 'lucide-react'
 import { createClient } from '@supabase/supabase-js'
 
@@ -191,6 +191,8 @@ function App() {
   const [loadingOlderMessages, setLoadingOlderMessages] = useState(false)
   const [activeStatus, setActiveStatus] = useState(null)
   const [friends, setFriends] = useState([])
+  const [friendRequests, setFriendRequests] = useState([])
+  const [friendRequestBusy, setFriendRequestBusy] = useState(null)
   const [blockedUsers, setBlockedUsers] = useState([])
   const [notifications, setNotifications] = useState([])
   const [tab, setTab] = useState('chats')
@@ -360,19 +362,22 @@ function App() {
     } else setProfile(ownProfile)
 
     const [{ data: memberRows, error: convError }, { data: summaryRows, error: summaryError }, { data: friendRows, error: friendError },
-      { data: notificationRows, error: notificationError },
+      { data: requestRows, error: requestError }, { data: notificationRows, error: notificationError },
       { data: blockedRows, error: blockedError }] = await Promise.all([
       supabase.from('conversation_members').select('conversation_id, conversations(id, name, description, is_group, created_by, updated_at, conversation_members(user_id, role, profiles(id, username, full_name, avatar_url, bio, show_online_status)))').eq('user_id', user.id),
       supabase.rpc('get_conversation_summaries'),
       supabase.from('friendships').select('user_id, friend_id, profiles!friendships_friend_id_fkey(id, username, full_name, avatar_url, bio, show_online_status)').eq('user_id', user.id),
+      supabase.from('friend_requests')
+        .select('id,sender_id,receiver_id,status,created_at,sender:profiles!friend_requests_sender_id_fkey(id,username,full_name,avatar_url),receiver:profiles!friend_requests_receiver_id_fkey(id,username,full_name,avatar_url)')
+        .or(`sender_id.eq.${user.id},receiver_id.eq.${user.id}`).neq('status', 'accepted'),
       supabase.from('notifications').select('*').eq('user_id', user.id).order('created_at', { ascending: false }).limit(25),
       supabase.from('blocked_users').select('blocked_id').eq('blocker_id', user.id),
     ])
-    if ([convError, friendError, notificationError, blockedError].some((error) => error?.code === 'PGRST205')) {
+    if ([convError, friendError, requestError, notificationError, blockedError].some((error) => error?.code === 'PGRST205')) {
       setDatabaseSetupRequired(true)
       return
     }
-    for (const loadError of [convError, friendError, notificationError, blockedError]) if (loadError) notify(loadError.message)
+    for (const loadError of [convError, friendError, requestError, notificationError, blockedError]) if (loadError) notify(loadError.message)
     let availableSummaries = summaryRows || []
     if (summaryError?.code === 'PGRST202') {
       const { data: legacyRows, error: legacyError } = await supabase.from('conversation_members')
@@ -421,6 +426,7 @@ function App() {
     setFriends((friendRows || []).map((row) => row.profiles && ({
       ...row.profiles, is_online: row.profiles.show_online_status && onlineUserIds.current.has(row.profiles.id),
     })).filter(Boolean))
+    setFriendRequests(requestRows || [])
     setBlockedUsers((blockedRows || []).map((row) => row.blocked_id))
     const loadedNotifications = notificationRows || []
     notificationIdsRef.current = new Set(loadedNotifications.map((item) => item.id))
@@ -447,6 +453,8 @@ function App() {
           }
         }).sort((a, b) => new Date(b.updated_at) - new Date(a.updated_at)))
       })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'friend_requests', filter: `receiver_id=eq.${session.user.id}` }, () => loadWorkspace())
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'friend_requests', filter: `sender_id=eq.${session.user.id}` }, () => loadWorkspace())
       .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'notifications', filter: `user_id=eq.${session.user.id}` }, (payload) => {
         if (!payload.new?.id || notificationIdsRef.current.has(payload.new.id)) return
         notificationIdsRef.current.add(payload.new.id)
@@ -821,12 +829,104 @@ function App() {
     setActiveId(data)
   }
 
+  async function sendFriendRequest(person) {
+    const requestExists = friendRequests.some((request) =>
+      (request.sender_id === session.user.id && request.receiver_id === person.id) ||
+      (request.sender_id === person.id && request.receiver_id === session.user.id)
+    )
+    if (person.id === session.user.id || friends.some((friend) => friend.id === person.id) || requestExists) return
+
+    setFriendRequestBusy(person.id)
+    const { error } = await supabase.from('friend_requests').insert({
+      sender_id: session.user.id,
+      receiver_id: person.id,
+    })
+    if (error) {
+      notify(error.code === '23505'
+        ? 'A request already exists between these accounts.'
+        : error.message)
+      setFriendRequestBusy(null)
+      return
+    }
+    notify(`Friend request sent to ${person.full_name}.`)
+    await loadWorkspace()
+    setFriendRequestBusy(null)
+  }
+
+  async function respondFriendRequest(request, accept) {
+    setFriendRequestBusy(request.id)
+    if (accept) {
+      const { error } = await supabase.rpc('accept_friend_request', { request_id: request.id })
+      if (error) {
+        notify(error.message)
+        setFriendRequestBusy(null)
+        return
+      }
+      notify(`You and ${request.sender?.full_name || 'this person'} are now friends.`)
+    } else {
+      const { data, error } = await supabase.from('friend_requests')
+        .update({ status: 'rejected' })
+        .eq('id', request.id)
+        .eq('receiver_id', session.user.id)
+        .eq('status', 'pending')
+        .select('id')
+        .maybeSingle()
+      if (error) {
+        notify(error.message)
+        setFriendRequestBusy(null)
+        return
+      }
+      if (!data) {
+        notify('This friend request is no longer available.')
+        setFriendRequestBusy(null)
+        return
+      }
+      notify('Friend request declined.')
+    }
+    await loadWorkspace()
+    setFriendRequestBusy(null)
+  }
+
   async function removeFriend(person) {
-    if (!window.confirm(`Remove ${person.full_name} from your contacts?`)) return
+    if (!window.confirm(`Unfriend ${person.full_name}? They will be removed from both People lists. Your direct chat and its history will remain.`)) return
     const { error } = await supabase.rpc('remove_friend', { other_user: person.id })
     if (error) { notify(error.message); return }
-    notify('Contact removed.')
+    notify(`${person.full_name} was removed from your People list. Your chat remains available.`)
     await loadWorkspace()
+  }
+
+  async function deleteChat(conversation) {
+    const message = conversation.is_group
+      ? `Leave "${conversation.name}" and remove it from your chats?`
+      : 'Remove this chat from your inbox? This only affects you; the other person keeps their chat history.'
+    if (!window.confirm(message)) return
+
+    const { error } = conversation.is_group
+      ? await supabase.rpc('leave_group', { group_id: conversation.id })
+      : await supabase.from('conversation_members').delete()
+        .eq('conversation_id', conversation.id)
+        .eq('user_id', session.user.id)
+    if (error) { notify(error.message); return }
+
+    setConversations((current) => current.filter((item) => item.id !== conversation.id))
+    const nextPins = pinnedConversationIds.filter((id) => id !== conversation.id)
+    setPinnedConversationIds(nextPins)
+    let resultMessage = conversation.is_group
+      ? 'You left the group.'
+      : 'Chat removed from your inbox. The other person keeps their history.'
+    try {
+      localStorage.setItem(`chatter-pinned-${session.user.id}`, JSON.stringify(nextPins))
+    } catch (storageError) {
+      resultMessage += ` The chat pin could not be cleared: ${storageError.message}`
+    }
+    if (activeId === conversation.id) {
+      setActiveId(null)
+      setMessages([])
+      setActiveStatus(null)
+      setHasOlderMessages(false)
+      setShowInfo(false)
+    }
+    notify(resultMessage)
   }
 
   async function createGroup(name, members) {
@@ -1188,6 +1288,9 @@ function App() {
       <button type="button" className={`conversation-pin ${isPinned ? 'conversation-pin-active' : ''}`} aria-label={isPinned ? 'Unpin chat' : 'Pin chat'} aria-pressed={isPinned} title={isPinned ? 'Unpin chat' : 'Pin chat'} onClick={() => togglePinnedConversation(conversation.id)}>
         <Pin size={15} />
       </button>
+      <button type="button" className="conversation-delete" aria-label={conversation.is_group ? 'Leave group and remove chat' : 'Delete chat for me'} title={conversation.is_group ? 'Leave group and remove chat' : 'Delete chat for me'} onClick={() => deleteChat(conversation)}>
+        <Trash2 size={15} />
+      </button>
     </div>
   }
 
@@ -1215,7 +1318,7 @@ function App() {
           <button className={tab === 'chats' ? 'nav-item selected' : 'nav-item'} onClick={() => setTab('chats')}><MessageCircle size={18} />Messages{unreadTotal > 0 && <span className="nav-badge">{unreadTotal}</span>}</button>
           <button className={tab === 'contacts' ? 'nav-item selected' : 'nav-item'} onClick={() => setTab('contacts')}><Users size={18} />People<span className="nav-count">{friends.length}</span></button>
         </nav>
-        <div className="list-heading"><span>{tab === 'chats' ? 'CHATS' : tab === 'contacts' ? 'TEAM CONTACTS' : tab === 'search' ? 'FIND TEAMMATES' : tab === 'notifications' ? 'RECENT ACTIVITY' : 'CHATS'}</span>{tab === 'chats' && <button className="icon-button small-icon" onClick={() => setShowGroup(true)} title="Create a group"><Plus size={17} /></button>}</div>
+        <div className="list-heading"><span>{tab === 'chats' ? 'CHATS' : tab === 'contacts' ? 'PEOPLE' : tab === 'search' ? 'FIND TEAMMATES' : tab === 'notifications' ? 'RECENT ACTIVITY' : 'CHATS'}</span>{tab === 'chats' && <button className="icon-button small-icon" onClick={() => setShowGroup(true)} title="Create a group"><Plus size={17} /></button>}</div>
         <div className="sidebar-list">
           {tab === 'chats' && (filteredConversations.length ? <>
             {pinnedConversations.length > 0 && <section className="chat-list-section">
@@ -1229,8 +1332,52 @@ function App() {
                 : <div className="pinned-only-note">All conversations are pinned.</div>}
             </section>
           </> : <div className="empty-sidebar"><div className="empty-icon"><MessageCircle size={20} /></div><strong>{query ? 'No conversations found' : 'A quiet inbox'}</strong><span>{query ? 'Try another search.' : 'Find someone and start chatting.'}</span><button className="text-button" onClick={() => setTab('search')}>Find people <ArrowUpRight size={14} /></button></div>)}
-          {tab === 'contacts' && (friends.length ? friends.map((person) => <div className="contact-row" key={person.id}><button className="contact-open" onClick={() => openDirect(person)}><Avatar profile={person} online={person.is_online} /><span className="contact-copy"><strong>{person.full_name}</strong><small>@{person.username}</small></span><MessageCircle size={17} /></button><button className="contact-remove" title={`Remove ${person.full_name}`} onClick={() => removeFriend(person)}><X size={15} /></button></div>) : <div className="empty-sidebar"><div className="empty-icon"><Users size={20} /></div><strong>Your circle starts here</strong><span>Find people by username or Chatter ID.</span><button className="text-button" onClick={() => setTab('search')}>Find someone <ArrowUpRight size={14} /></button></div>)}
-          {tab === 'search' && <><form className="people-search" onSubmit={searchUsers}><Search size={17} /><input autoFocus value={userSearch} onChange={(event) => setUserSearch(event.target.value)} placeholder="Username or Chatter ID" /><button className="primary-button search-submit" disabled={searching}>{searching ? 'Searching…' : 'Search'}</button></form>{searchResults.map((person) => <div className="search-result" key={person.id}><Avatar profile={person} online={person.is_online} /><span className="contact-copy"><strong>{person.full_name}</strong><small>@{person.username} · {person.user_id} · {person.is_online ? 'Online' : person.last_seen_at ? `Seen ${formatTime(person.last_seen_at)}` : 'Offline'}</small></span><div className="result-actions"><button className="primary-button result-message" onClick={() => openDirect(person)}>Message</button></div></div>)}{!searching && userSearch && !searchResults.length && <div className="empty-sidebar"><strong>No one found</strong><span>Check the spelling or try their exact username or ID.</span></div>}<div className="search-hint"><Info size={14} />Search exact usernames or unique Chatter IDs.</div></>}
+          {tab === 'contacts' && <>
+            {friendRequests.some((request) => request.status === 'pending' && request.receiver_id === session.user.id) && <section className="people-request-section">
+              <h3 className="people-section-heading">Friend requests</h3>
+              {friendRequests.filter((request) => request.status === 'pending' && request.receiver_id === session.user.id).map((request) => <div className="people-request-row" key={request.id}>
+                <Avatar profile={request.sender} />
+                <span className="contact-copy"><strong>{request.sender?.full_name || 'Chatter user'}</strong><small>@{request.sender?.username || 'unknown'}</small></span>
+                <div className="people-request-actions">
+                  <button className="primary-button" disabled={Boolean(friendRequestBusy)} onClick={() => respondFriendRequest(request, true)}>{friendRequestBusy === request.id ? '…' : 'Accept'}</button>
+                  <button className="subtle-button" disabled={Boolean(friendRequestBusy)} onClick={() => respondFriendRequest(request, false)}>Reject</button>
+                </div>
+              </div>)}
+            </section>}
+            {friendRequests.some((request) => request.status === 'pending' && request.sender_id === session.user.id) && <section className="people-request-section">
+              <h3 className="people-section-heading">Sent requests</h3>
+              {friendRequests.filter((request) => request.status === 'pending' && request.sender_id === session.user.id).map((request) => <div className="people-request-row" key={request.id}>
+                <Avatar profile={request.receiver} />
+                <span className="contact-copy"><strong>{request.receiver?.full_name || 'Chatter user'}</strong><small>@{request.receiver?.username || 'unknown'} · Waiting for a response</small></span>
+              </div>)}
+            </section>}
+            <section className="people-contact-section">
+              <h3 className="people-section-heading">People</h3>
+              {friends.length ? friends.map((person) => <div className="contact-row" key={person.id}>
+                <button className="contact-open" onClick={() => openDirect(person)}><Avatar profile={person} online={person.is_online} /><span className="contact-copy"><strong>{person.full_name}</strong><small>@{person.username}</small></span><MessageCircle size={17} /></button>
+                <button className="contact-remove" aria-label={`Unfriend ${person.full_name}`} title={`Unfriend ${person.full_name}`} onClick={() => removeFriend(person)}><X size={14} /><span>Unfriend</span></button>
+              </div>) : <div className="empty-sidebar"><div className="empty-icon"><Users size={20} /></div><strong>Your circle starts here</strong><span>Find people by username or Chatter ID.</span><button className="text-button" onClick={() => setTab('search')}>Find someone <ArrowUpRight size={14} /></button></div>}
+            </section>
+          </>}
+          {tab === 'search' && <><form className="people-search" onSubmit={searchUsers}><Search size={17} /><input autoFocus value={userSearch} onChange={(event) => setUserSearch(event.target.value)} placeholder="Username or Chatter ID" /><button className="primary-button search-submit" disabled={searching}>{searching ? 'Searching…' : 'Search'}</button></form>{searchResults.map((person) => {
+            const isFriend = friends.some((friend) => friend.id === person.id)
+            const request = friendRequests.find((item) =>
+              (item.sender_id === session.user.id && item.receiver_id === person.id) ||
+              (item.sender_id === person.id && item.receiver_id === session.user.id)
+            )
+            const requestLabel = request?.status === 'pending'
+              ? request.sender_id === session.user.id ? 'Request sent' : 'Respond in People'
+              : request?.status === 'rejected' ? 'Request declined'
+                : request?.status === 'cancelled' ? 'Request cancelled' : 'Add friend'
+            return <div className="search-result" key={person.id}>
+              <Avatar profile={person} online={person.is_online} />
+              <span className="contact-copy"><strong>{person.full_name}</strong><small>@{person.username} · {person.user_id} · {person.is_online ? 'Online' : person.last_seen_at ? `Seen ${formatTime(person.last_seen_at)}` : 'Offline'}</small></span>
+              <div className="result-actions">
+                <button className="subtle-button friend-request-button" disabled={isFriend || Boolean(request) || Boolean(friendRequestBusy)} onClick={() => sendFriendRequest(person)}>{friendRequestBusy === person.id ? 'Sending…' : isFriend ? 'Friends' : requestLabel}</button>
+                <button className="primary-button result-message" onClick={() => openDirect(person)}>Message</button>
+              </div>
+            </div>
+          })}{!searching && userSearch && !searchResults.length && <div className="empty-sidebar"><strong>No one found</strong><span>Check the spelling or try their exact username or ID.</span></div>}<div className="search-hint"><Info size={14} />Search exact usernames or unique Chatter IDs.</div></>}
           {tab === 'notifications' && (notifications.length ? notifications.map((notification) => <div className="activity-row" key={notification.id}><span className="activity-icon"><Bell size={15} /></span><span><strong>{notification.title || 'Chatter update'}</strong><small>{notification.body || notification.type}</small><small>{formatTime(notification.created_at)}</small></span></div>) : <div className="empty-sidebar"><div className="empty-icon"><Bell size={20} /></div><strong>Nothing new</strong><span>Your latest activity will appear here.</span></div>)}
         </div>
         <footer className="sidebar-footer"><div className={`footer-status connection-${connectionStatus}`} role="status" aria-live="polite"><i />{connectionStatus === 'connected' ? 'Connected' : connectionStatus === 'disconnected' ? 'Reconnecting…' : 'Connecting…'}</div><button className="footer-help" onClick={() => notify('Tip: search for a username or Chatter ID to find friends.')}><CircleHelp size={15} /> Help & tips</button></footer>
