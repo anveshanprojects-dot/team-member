@@ -728,3 +728,52 @@ html[data-theme=dark] .settings-nav-selected, html[data-theme=dark] .settings-na
   .composer { gap: 3px; }
   .mobile-bottom-nav { box-shadow: 0 -4px 16px rgba(28, 54, 42, .04); }
 }
+
+/* Readable chat scale with familiar WhatsApp-style spacing. */
+@media (min-width: 1101px) {
+  .app-shell { grid-template-columns: 350px minmax(0, 1fr); }
+}
+@media (min-width: 701px) and (max-width: 1100px) {
+  .app-shell { grid-template-columns: 300px minmax(0, 1fr); }
+}
+.my-profile-copy strong { font-size: 14px; }
+.my-profile-copy small, .contact-copy small { font-size: 12px; }
+.search-box input, .people-search input { font-size: 14px; }
+.main-nav { gap: 5px; }
+.nav-item { min-height: 40px; gap: 10px; font-size: 13px; }
+.nav-item svg { width: 18px; height: 18px; }
+.list-heading { min-height: 46px; font-size: 10px; }
+.conversation-row { min-height: 72px; gap: 12px; }
+.conversation-title { font-size: 14px; }
+.conversation-preview { font-size: 12px; }
+.conversation-meta time { font-size: 10px; }
+.unread-count { min-width: 19px; height: 19px; font-size: 10px; }
+.contact-copy strong { font-size: 13px; }
+.chat-header { height: 72px; }
+.chat-person strong { font-size: 16px; }
+.chat-person small { font-size: 12px; }
+.message-content-wrap { max-width: min(74%, 560px); }
+.message-sender { font-size: 11px; }
+.message-bubble { padding: 11px 14px 9px; font-size: 15px; line-height: 1.48; }
+.message-meta { height: 18px; font-size: 10px; }
+.message-image { max-width: min(460px, 100%); max-height: 380px; object-fit: contain; }
+.message-video { width: min(460px, 100%); max-height: 380px; }
+.message-content-wrap audio { max-width: 340px; }
+.file-attachment { font-size: 13px; }
+.file-attachment small { font-size: 11px; }
+.composer { min-height: 76px; }
+.composer-input { height: 48px; }
+.composer-input input { font-size: 14px; }
+.send-button { width: 44px; height: 44px; }
+
+@media (max-width: 700px) {
+  .conversation-row { min-height: 70px; }
+  .chat-header { height: 62px; }
+  .chat-person strong { font-size: 15px; }
+  .chat-person small { font-size: 11px; }
+  .message-content-wrap { max-width: 88%; }
+  .message-bubble { padding: 10px 12px 8px; font-size: 15px; }
+  .message-image { max-width: min(82vw, 420px); max-height: 340px; }
+  .message-video { width: min(82vw, 420px); max-height: 340px; }
+  .composer-input input { font-size: 16px; }
+}

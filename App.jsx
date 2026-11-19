@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   ArrowDown, ArrowLeft, ArrowUpRight, Bell, Check, CheckCheck, ChevronDown,
-  CircleHelp, Copy, File, FileText, Image, Info, LogOut, Menu, MessageCircle, MoreHorizontal, Pin,
+  CircleHelp, Compass, Copy, File, FileText, Image, Info, LogOut, Menu, MessageCircle, MoreHorizontal, Pin,
   Mic, Paperclip, Plus, Search, Send, Settings, Smile, Users, X,
 } from 'lucide-react'
 import { createClient } from '@supabase/supabase-js'
@@ -1015,6 +1015,7 @@ function App() {
           {query && <button type="button" className="clear-search" onClick={() => setQuery('')}><X size={14} /></button>}
         </form>
         <nav className="main-nav" aria-label="Main navigation">
+          <button className={tab === 'search' ? 'nav-item selected' : 'nav-item'} onClick={() => setTab('search')}><Compass size={18} />Discover</button>
           <button className={tab === 'chats' ? 'nav-item selected' : 'nav-item'} onClick={() => setTab('chats')}><MessageCircle size={18} />Messages{unreadTotal > 0 && <span className="nav-badge">{unreadTotal}</span>}</button>
           <button className={tab === 'contacts' ? 'nav-item selected' : 'nav-item'} onClick={() => setTab('contacts')}><Users size={18} />People<span className="nav-count">{friends.length}</span></button>
           <button className={tab === 'requests' ? 'nav-item selected' : 'nav-item'} onClick={() => setTab('requests')}><ArrowDown size={18} />Requests{requests.length > 0 && <span className="nav-badge">{requests.length}</span>}</button>
