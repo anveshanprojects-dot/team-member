@@ -1,0 +1,1004 @@
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import {
+  ArrowDown, ArrowLeft, ArrowUpRight, Bell, Check, CheckCheck, ChevronDown,
+  CircleHelp, File, FileText, Image, Info, LogOut, Menu, MessageCircle, MoreHorizontal,
+  Mic, Paperclip, Plus, Search, Send, Settings, Smile, Users, X,
+} from 'lucide-react'
+import { createClient } from '@supabase/supabase-js'
+
+const supabaseUrl = import.meta.env.VITE_SUPABASE_URL
+const supabaseKey = import.meta.env.VITE_SUPABASE_ANON_KEY
+const supabase = supabaseUrl && supabaseKey ? createClient(supabaseUrl, supabaseKey) : null
+const EMOJIS = ['😀', '😂', '🥰', '😍', '😊', '😎', '🥳', '😭', '👍', '❤️', '🔥', '🎉', '🙏', '✨', '👋', '🤔']
+
+function initials(name = '?') {
+  return name.trim().split(/\s+/).slice(0, 2).map((part) => part[0]).join('').toUpperCase()
+}
+
+function formatTime(value) {
+  if (!value) return ''
+  return new Intl.DateTimeFormat(undefined, { hour: 'numeric', minute: '2-digit' }).format(new Date(value))
+}
+
+function Avatar({ profile, size = 'normal', online = false }) {
+  return (
+    <span className={`avatar avatar-${size}`}>
+      {profile?.avatar_url
+        ? <img src={profile.avatar_url} alt="" />
+        : <span>{initials(profile?.full_name || profile?.username || 'U')}</span>}
+      {online && <i className="online-dot" />}
+    </span>
+  )
+}
+
+function AuthScreen({ onAuthenticated }) {
+  const [mode, setMode] = useState('login')
+  const [busy, setBusy] = useState(false)
+  const [message, setMessage] = useState('')
+  const [error, setError] = useState('')
+  const [form, setForm] = useState({ fullName: '', username: '', email: '', password: '' })
+  const update = (key) => (event) => setForm((current) => ({ ...current, [key]: event.target.value }))
+
+  async function submit(event) {
+    event.preventDefault()
+    setBusy(true)
+    setError('')
+    setMessage('')
+    try {
+      if (mode === 'forgot') {
+        const { error: requestError } = await supabase.auth.resetPasswordForEmail(form.email, {
+          redirectTo: `${window.location.origin}/`,
+        })
+        if (requestError) throw requestError
+        setMessage('Password reset instructions are on their way to your email.')
+      } else if (mode === 'register') {
+        const { data, error: signUpError } = await supabase.auth.signUp({
+          email: form.email.trim(),
+          password: form.password,
+          options: { data: {
+            full_name: form.fullName.trim(),
+            username: form.username.trim().replace(/^@/, '').toLowerCase(),
+          } },
+        })
+        if (signUpError) throw signUpError
+        if (data.session) {
+          const { error: signOutError } = await supabase.auth.signOut({ scope: 'local' })
+          if (signOutError) throw signOutError
+        }
+        setForm((current) => ({ ...current, password: '' }))
+        setMode('login')
+        setMessage(data.session
+          ? 'Your account was created successfully. Sign in to continue.'
+          : 'Your account was created. Verify your email, then sign in to continue.')
+      } else {
+        const identifier = form.email.trim()
+        const { data, error: loginError } = identifier.includes('@')
+          ? await supabase.auth.signInWithPassword({ email: identifier, password: form.password })
+          : await supabase.functions.invoke('username-login', { body: { username: identifier.replace(/^@/, '').toLowerCase(), password: form.password } })
+        if (loginError) throw loginError
+        if (identifier.includes('@')) onAuthenticated(data.session)
+        else if (data?.session?.access_token && data?.session?.refresh_token) onAuthenticated((await supabase.auth.setSession(data.session)).data.session)
+        else throw new Error(data?.error || 'Invalid username or password.')
+      }
+    } catch (requestError) {
+      setError(requestError.message || 'Something went wrong. Please try again.')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const heading = mode === 'register' ? 'Create your account' : mode === 'forgot' ? 'Reset your password' : 'Welcome back'
+  return (
+    <main className="auth-page">
+      <div className="auth-art">
+        <div className="brand brand-light"><span className="brand-mark"><MessageCircle size={23} /></span> chatter</div>
+        <div className="art-copy">
+          <div className="art-bubble bubble-one">The best conversations happen here. <span>✨</span></div>
+          <div className="art-bubble bubble-two">Hey! Are we still on for coffee? <span>10:42</span></div>
+          <div className="art-bubble bubble-three">Absolutely! ☕</div>
+          <span className="art-orbit orbit-one" /><span className="art-orbit orbit-two" />
+          <h1>Closer, even<br />when you're apart.</h1>
+          <p>Good conversations make every day a little brighter.</p>
+        </div>
+        <span className="auth-footnote">A little more human, a little more connected.</span>
+      </div>
+      <section className="auth-panel">
+        <div className="auth-card">
+          <span className="eyebrow">{mode === 'register' ? 'GET STARTED' : mode === 'forgot' ? 'ACCOUNT RECOVERY' : 'YOUR PEOPLE ARE HERE'}</span>
+          <h2>{heading}</h2>
+          <p className="muted">{mode === 'register' ? 'Join Chatter and make room for more meaningful conversations.' : mode === 'forgot' ? 'We’ll send you a link to get back into your account.' : 'Sign in to pick up right where you left off.'}</p>
+          {error && <div className="alert alert-error">{error}</div>}
+          {message && <div className="alert alert-success">{message}</div>}
+          <form onSubmit={submit} className="auth-form">
+            {mode === 'register' && <>
+              <label>Full name<input required autoComplete="name" value={form.fullName} onChange={update('fullName')} placeholder="Your name" maxLength="80" /></label>
+              <label>Username<div className="input-prefix"><span>@</span><input required autoComplete="username" value={form.username} onChange={update('username')} placeholder="yourname" pattern="[A-Za-z0-9_]{3,24}" title="3–24 letters, numbers, or underscores" maxLength="24" /></div></label>
+            </>}
+            <label>{mode === 'login' ? 'Email or username' : 'Email address'}<input required type={mode === 'login' ? 'text' : 'email'} autoComplete="email" value={form.email} onChange={update('email')} placeholder={mode === 'login' ? 'you@example.com or @username' : 'you@example.com'} /></label>
+            {mode !== 'forgot' && <label>Password<input required type="password" autoComplete={mode === 'register' ? 'new-password' : 'current-password'} value={form.password} onChange={update('password')} placeholder="At least 8 characters" minLength="8" /></label>}
+            {mode === 'login' && <button className="text-button forgot-link" type="button" onClick={() => { setMode('forgot'); setError(''); setMessage('') }}>Forgot password?</button>}
+            <button className="primary-button auth-submit" disabled={busy}>{busy ? <span className="spinner" /> : mode === 'forgot' ? 'Send reset link' : mode === 'register' ? 'Create account' : 'Sign in'} {!busy && <ArrowUpRight size={17} />}</button>
+          </form>
+          <p className="auth-switch">{mode === 'forgot' ? 'Remember your password?' : mode === 'register' ? 'Already have an account?' : 'New to Chatter?'} <button className="text-button" onClick={() => { setMode(mode === 'register' || mode === 'forgot' ? 'login' : 'register'); setError(''); setMessage('') }}>{mode === 'register' || mode === 'forgot' ? 'Sign in' : 'Create an account'}</button></p>
+          {mode !== 'register' && mode !== 'forgot' && <div className="auth-security"><Info size={14} /> Your chats are private and secured with Supabase Auth.</div>}
+        </div>
+      </section>
+    </main>
+  )
+}
+
+function App() {
+  const [session, setSession] = useState(null)
+  const [initializing, setInitializing] = useState(true)
+  const [databaseSetupRequired, setDatabaseSetupRequired] = useState(false)
+  const [profile, setProfile] = useState(null)
+  const [conversations, setConversations] = useState([])
+  const [activeId, setActiveId] = useState(null)
+  const [messages, setMessages] = useState([])
+  const [activeStatus, setActiveStatus] = useState(null)
+  const [friends, setFriends] = useState([])
+  const [blockedUsers, setBlockedUsers] = useState([])
+  const [requests, setRequests] = useState([])
+  const [notifications, setNotifications] = useState([])
+  const [tab, setTab] = useState('chats')
+  const [query, setQuery] = useState('')
+  const [userSearch, setUserSearch] = useState('')
+  const [searchResults, setSearchResults] = useState([])
+  const [searching, setSearching] = useState(false)
+  const [draft, setDraft] = useState('')
+  const [replyTo, setReplyTo] = useState(null)
+  const [showInfo, setShowInfo] = useState(false)
+  const [showEmoji, setShowEmoji] = useState(false)
+  const [showAttach, setShowAttach] = useState(false)
+  const [recording, setRecording] = useState(false)
+  const [showProfile, setShowProfile] = useState(false)
+  const [showSettings, setShowSettings] = useState(false)
+  const [showGroup, setShowGroup] = useState(false)
+  const [showMobileMenu, setShowMobileMenu] = useState(false)
+  const [toast, setToast] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [notificationsEnabled, setNotificationsEnabled] = useState(localStorage.getItem('chatter-notifications') === 'true')
+  const [theme, setTheme] = useState(localStorage.getItem('chatter-theme') || 'light')
+  const [typingUsers, setTypingUsers] = useState({})
+  const bottomRef = useRef(null)
+  const fileRef = useRef(null)
+  const typingChannel = useRef(null)
+  const recorderRef = useRef(null)
+  const streamRef = useRef(null)
+  const onlineUserIds = useRef(new Set())
+  const notificationsEnabledRef = useRef(notificationsEnabled)
+
+  useEffect(() => { notificationsEnabledRef.current = notificationsEnabled }, [notificationsEnabled])
+
+  const activeConversation = conversations.find((conversation) => conversation.id === activeId)
+  const activeMember = activeConversation?.members?.find((member) => member.id !== session?.user?.id)
+  const activeTitle = activeConversation?.is_group ? activeConversation.name : activeMember?.full_name || activeMember?.username || 'Conversation'
+  const filteredConversations = useMemo(() => conversations.filter((conversation) => {
+    const person = conversation.members?.find((member) => member.id !== session?.user?.id)
+    const title = conversation.is_group ? conversation.name : person?.full_name || person?.username || ''
+    return title.toLowerCase().includes(query.toLowerCase()) ||
+      conversation.last_message?.content?.toLowerCase().includes(query.toLowerCase())
+  }), [conversations, query, session?.user?.id])
+
+  const notify = useCallback((text) => {
+    setToast(text)
+    window.setTimeout(() => setToast(''), 3500)
+  }, [])
+
+  useEffect(() => {
+    if (!supabase) { setInitializing(false); return }
+    supabase.auth.getSession().then(({ data, error }) => {
+      if (error) notify(error.message)
+      setSession(data.session)
+      setInitializing(false)
+    })
+    const { data } = supabase.auth.onAuthStateChange((_event, nextSession) => {
+      setSession(nextSession)
+      setInitializing(false)
+    })
+    return () => data.subscription.unsubscribe()
+  }, [notify])
+
+  const loadWorkspace = useCallback(async () => {
+    if (!session?.user) return
+    setDatabaseSetupRequired(false)
+    const user = session.user
+    const profileColumns = 'id,user_id,username,full_name,bio,avatar_url,discoverable,show_online_status,show_last_seen,created_at'
+    const { data: ownProfile, error: profileError } = await supabase.from('profiles').select(profileColumns).eq('id', user.id).maybeSingle()
+    if (profileError) {
+      if (profileError.code === 'PGRST205') setDatabaseSetupRequired(true)
+      else notify(profileError.message)
+      return
+    }
+    if (!ownProfile) {
+      const { data: created, error: createError } = await supabase.from('profiles').insert({
+        id: user.id,
+        full_name: user.user_metadata?.full_name || 'New Chatter',
+        username: user.user_metadata?.username || `user_${user.id.slice(0, 8)}`,
+      }).select(profileColumns).single()
+      if (createError) notify(createError.message)
+      else setProfile(created)
+    } else setProfile(ownProfile)
+
+    const [{ data: memberRows, error: convError }, { data: friendRows, error: friendError },
+      { data: requestRows, error: requestError }, { data: notificationRows, error: notificationError },
+      { data: blockedRows, error: blockedError }] = await Promise.all([
+      supabase.from('conversation_members').select('conversation_id, last_read_at, conversations(id, name, description, is_group, created_by, updated_at, conversation_members(user_id, role, profiles(id, username, full_name, avatar_url, bio, show_online_status)), messages(id, content, created_at, sender_id, type))').eq('user_id', user.id),
+      supabase.from('friendships').select('user_id, friend_id, profiles!friendships_friend_id_fkey(id, username, full_name, avatar_url, bio, show_online_status)').eq('user_id', user.id),
+      supabase.from('friend_requests').select('id, sender_id, created_at, profiles!friend_requests_sender_id_fkey(id, username, full_name, avatar_url)').eq('receiver_id', user.id).eq('status', 'pending'),
+      supabase.from('notifications').select('*').eq('user_id', user.id).order('created_at', { ascending: false }).limit(25),
+      supabase.from('blocked_users').select('blocked_id').eq('blocker_id', user.id),
+    ])
+    if ([convError, friendError, requestError, notificationError, blockedError].some((error) => error?.code === 'PGRST205')) {
+      setDatabaseSetupRequired(true)
+      return
+    }
+    for (const loadError of [convError, friendError, requestError, notificationError, blockedError]) if (loadError) notify(loadError.message)
+    const seen = new Set()
+    const normalized = (memberRows || []).flatMap((row) => {
+      const conversation = row.conversations
+      if (!conversation || seen.has(conversation.id)) return []
+      seen.add(conversation.id)
+      const members = (conversation.conversation_members || []).map((member) => member.profiles ? {
+        ...member.profiles, role: member.role,
+        is_online: member.profiles.show_online_status && onlineUserIds.current.has(member.profiles.id),
+      } : null).filter(Boolean)
+      const orderedMessages = (conversation.messages || []).sort((a, b) => new Date(a.created_at) - new Date(b.created_at))
+      return [{ ...conversation, members, last_message: orderedMessages.at(-1), unread: orderedMessages.filter((message) => message.sender_id !== user.id && (!row.last_read_at || new Date(message.created_at) > new Date(row.last_read_at))).length }]
+    }).sort((a, b) => new Date(b.updated_at) - new Date(a.updated_at))
+    setConversations(normalized)
+    setFriends((friendRows || []).map((row) => row.profiles && ({
+      ...row.profiles, is_online: row.profiles.show_online_status && onlineUserIds.current.has(row.profiles.id),
+    })).filter(Boolean))
+    setBlockedUsers((blockedRows || []).map((row) => row.blocked_id))
+    setRequests(requestRows || [])
+    setNotifications(notificationRows || [])
+    setActiveId((current) => current && normalized.some((conversation) => conversation.id === current) ? current : null)
+  }, [session, notify])
+
+  useEffect(() => { if (session) loadWorkspace() }, [session, loadWorkspace])
+
+  useEffect(() => {
+    if (!session?.user || !supabase) return
+    const channel = supabase.channel(`workspace-${session.user.id}`)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'messages' }, () => loadWorkspace())
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'friend_requests', filter: `receiver_id=eq.${session.user.id}` }, () => loadWorkspace())
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'notifications', filter: `user_id=eq.${session.user.id}` }, (payload) => {
+        setNotifications((current) => [payload.new, ...current])
+        if (notificationsEnabledRef.current && 'Notification' in window && Notification.permission === 'granted') {
+          new Notification(payload.new.title || 'Chatter', { body: payload.new.body || 'You have a new update.' })
+        }
+        notify(payload.new.title || 'You have a new notification')
+      })
+      .subscribe()
+    const presence = supabase.channel('online-presence', { config: { presence: { key: session.user.id } } })
+    let heartbeatId
+    presence.on('presence', { event: 'sync' }, () => {
+      const onlineIds = Object.keys(presence.presenceState())
+      onlineUserIds.current = new Set(onlineIds)
+      setConversations((current) => current.map((conversation) => ({
+        ...conversation,
+        members: conversation.members?.map((member) => ({ ...member, is_online: member.show_online_status && (onlineIds.includes(member.id) || member.id === session.user.id) })),
+      })))
+      setFriends((current) => current.map((friend) => ({ ...friend, is_online: friend.show_online_status && onlineIds.includes(friend.id) })))
+    }).subscribe(async (status) => {
+      if (status === 'SUBSCRIBED') {
+        const updatePresence = async () => {
+          await presence.track({ online_at: new Date().toISOString() })
+          const { error } = await supabase.from('profiles').update({ is_online: true, last_seen_at: new Date().toISOString() }).eq('id', session.user.id)
+          if (error) notify(error.message)
+        }
+        await updatePresence()
+        heartbeatId = window.setInterval(updatePresence, 60000)
+      }
+    })
+    return () => {
+      if (heartbeatId) window.clearInterval(heartbeatId)
+      supabase.removeChannel(channel)
+      supabase.removeChannel(presence)
+      supabase.from('profiles').update({ is_online: false, last_seen_at: new Date().toISOString() }).eq('id', session.user.id)
+        .then(({ error }) => { if (error) notify(error.message) })
+    }
+  }, [session, loadWorkspace, notify])
+
+  useEffect(() => {
+    if (tab !== 'notifications' || !session?.user) return
+    const unread = notifications.filter((item) => !item.read_at).map((item) => item.id)
+    if (!unread.length) return
+    const readAt = new Date().toISOString()
+    supabase.from('notifications').update({ read_at: readAt }).eq('user_id', session.user.id).is('read_at', null).in('id', unread)
+      .then(({ error }) => {
+        if (error) notify(error.message)
+        else setNotifications((current) => current.map((item) => unread.includes(item.id) ? { ...item, read_at: readAt } : item))
+      })
+  }, [tab, session, notifications, notify])
+
+  useEffect(() => {
+    if (!activeId || !session?.user) { setMessages([]); return }
+    let alive = true
+    async function loadMessages() {
+      const { data, error } = await supabase.from('messages').select('*, profiles:sender_id(id, username, full_name, avatar_url), message_reactions(id, user_id, emoji), message_receipts(user_id, read_at)').eq('conversation_id', activeId).is('deleted_at', null).order('created_at', { ascending: true })
+      if (error) { notify(error.message); return }
+      const withSignedUrls = await Promise.all((data || []).map(async (message) => {
+        if (!message.attachment_url) return message
+        const { data: signed, error: signedError } = await supabase.storage.from('chat-files').createSignedUrl(message.attachment_url, 3600)
+        if (signedError) {
+          notify(`Could not load attachment: ${signedError.message}`)
+          return message
+        }
+        return { ...message, attachment_path: message.attachment_url, attachment_url: signed.signedUrl }
+      }))
+      if (alive) setMessages(withSignedUrls)
+      const { error: readError } = await supabase.from('conversation_members').update({ last_read_at: new Date().toISOString() }).eq('conversation_id', activeId).eq('user_id', session.user.id)
+      if (readError) notify(readError.message)
+      const unreadIds = (data || []).filter((message) => message.sender_id !== session.user.id &&
+        !message.message_receipts?.some((receipt) => receipt.user_id === session.user.id && receipt.read_at)).map((message) => message.id)
+      if (unreadIds.length) {
+        const { error: receiptError } = await supabase.from('message_receipts').update({ read_at: new Date().toISOString() })
+          .eq('user_id', session.user.id).is('read_at', null).in('message_id', unreadIds)
+        if (receiptError) notify(receiptError.message)
+      }
+    }
+    loadMessages()
+    const channel = supabase.channel(`messages-${activeId}`)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'messages', filter: `conversation_id=eq.${activeId}` }, loadMessages)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'message_reactions' }, loadMessages)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'message_receipts' }, loadMessages)
+      .subscribe()
+    typingChannel.current = supabase.channel(`typing-${activeId}`)
+      .on('broadcast', { event: 'typing' }, ({ payload }) => {
+        setTypingUsers((current) => ({ ...current, [payload.userId]: payload.isTyping }))
+        window.setTimeout(() => setTypingUsers((current) => ({ ...current, [payload.userId]: false })), 2500)
+      }).subscribe()
+    return () => { alive = false; supabase.removeChannel(channel); if (typingChannel.current) supabase.removeChannel(typingChannel.current) }
+  }, [activeId, session, notify])
+
+  useEffect(() => {
+    if (!activeMember?.id || activeConversation?.is_group) { setActiveStatus(null); return }
+    let active = true
+    supabase.rpc('get_profile_status', { other_user: activeMember.id }).then(({ data, error }) => {
+      if (error) { notify(error.message); return }
+      if (active) setActiveStatus(data?.[0] || null)
+    })
+    return () => { active = false }
+  }, [activeMember?.id, activeConversation?.is_group, notify])
+
+  useEffect(() => { bottomRef.current?.scrollIntoView({ behavior: 'smooth' }) }, [messages, activeId])
+  useEffect(() => {
+    document.documentElement.dataset.theme = theme
+    localStorage.setItem('chatter-theme', theme)
+  }, [theme])
+  useEffect(() => { localStorage.setItem('chatter-notifications', String(notificationsEnabled)) }, [notificationsEnabled])
+
+  useEffect(() => {
+    if (!session?.user || !activeId) return
+    const timeout = window.setTimeout(() => {
+      typingChannel.current?.send({ type: 'broadcast', event: 'typing', payload: { userId: session.user.id, isTyping: false } })
+    }, 1400)
+    return () => window.clearTimeout(timeout)
+  }, [draft, session, activeId])
+
+  useEffect(() => () => {
+    recorderRef.current?.stop()
+    streamRef.current?.getTracks().forEach((track) => track.stop())
+  }, [])
+
+  async function searchUsers(event, searchValue = userSearch) {
+    event.preventDefault()
+    const value = searchValue.trim().replace(/^@/, '')
+    if (!value) { setSearchResults([]); return }
+    setSearching(true)
+    const { data, error } = await supabase.rpc('search_profiles', { search_term: value })
+    setSearching(false)
+    if (error) notify(error.message)
+    else setSearchResults((data || []).filter((person) => person.id !== session.user.id))
+  }
+
+  async function openDirect(profileToOpen) {
+    const { data, error } = await supabase.rpc('get_or_create_dm', { other_user: profileToOpen.id })
+    if (error) { notify(error.message); return }
+    setTab('chats')
+    setSearchResults([])
+    setUserSearch('')
+    await loadWorkspace()
+    setActiveId(data)
+  }
+
+  async function sendFriendRequest(person) {
+    const { error } = await supabase.from('friend_requests').insert({ sender_id: session.user.id, receiver_id: person.id })
+    if (error) notify(error.code === '23505' ? 'A request already exists between these accounts.' : error.message)
+    else notify(`Friend request sent to ${person.full_name}.`)
+  }
+
+  async function removeFriend(person) {
+    if (!window.confirm(`Remove ${person.full_name} from your contacts?`)) return
+    const { error } = await supabase.rpc('remove_friend', { other_user: person.id })
+    if (error) { notify(error.message); return }
+    notify('Contact removed.')
+    await loadWorkspace()
+  }
+
+  async function respondRequest(request, accept) {
+    setBusy(true)
+    if (accept) {
+      const { error } = await supabase.rpc('accept_friend_request', { request_id: request.id })
+      if (error) { notify(error.message); setBusy(false); return }
+      notify('Friend request accepted.')
+      await loadWorkspace()
+      setBusy(false)
+      return
+    }
+    const { error } = await supabase.from('friend_requests').update({ status: accept ? 'accepted' : 'rejected' }).eq('id', request.id)
+    if (error) notify(error.message)
+    else { notify('Request declined.'); loadWorkspace() }
+    setBusy(false)
+  }
+
+  async function createGroup(name, members) {
+    setBusy(true)
+    const { data: conversation, error } = await supabase.from('conversations').insert({ name: name.trim(), is_group: true, created_by: session.user.id }).select().single()
+    if (error) { notify(error.message); setBusy(false); return }
+    const uniqueIds = [...new Set([session.user.id, ...members])]
+    const { error: membersError } = await supabase.from('conversation_members').insert(uniqueIds.map((userId) => ({
+      conversation_id: conversation.id, user_id: userId, role: userId === session.user.id ? 'admin' : 'member',
+    })))
+    setBusy(false)
+    if (membersError) { notify(membersError.message); return }
+    setShowGroup(false)
+    await loadWorkspace()
+    setActiveId(conversation.id)
+    notify('Your group is ready.')
+  }
+
+  async function blockUser(userId) {
+    const { error } = await supabase.from('blocked_users').insert({ blocker_id: session.user.id, blocked_id: userId })
+    if (error) { notify(error.message); return }
+    notify('User blocked. You can manage blocked accounts in settings.')
+    setActiveId(null)
+    setShowInfo(false)
+    await loadWorkspace()
+  }
+
+  async function unblockUser(userId) {
+    const { error } = await supabase.from('blocked_users').delete().eq('blocker_id', session.user.id).eq('blocked_id', userId)
+    if (error) notify(error.message)
+    else { notify('User unblocked.'); await loadWorkspace() }
+  }
+
+  async function addGroupMember(userId) {
+    const { error } = await supabase.from('conversation_members').insert({ conversation_id: activeId, user_id: userId, role: 'member' })
+    if (error) notify(error.message)
+    else { notify('Member added.'); await loadWorkspace() }
+  }
+
+  async function removeGroupMember(userId) {
+    if (userId === session.user.id) {
+      const { error } = await supabase.rpc('leave_group', { group_id: activeId })
+      if (error) { notify(error.message); return }
+      setActiveId(null)
+      await loadWorkspace()
+      notify('You left the group.')
+      return
+    }
+    const { error } = await supabase.from('conversation_members').delete().eq('conversation_id', activeId).eq('user_id', userId)
+    if (error) notify(error.message)
+    else { notify('Member removed.'); await loadWorkspace() }
+  }
+
+  async function renameGroup(conversation) {
+    if (conversation.members.find((member) => member.id === session.user.id)?.role !== 'admin') {
+      notify('Only group admins can rename the group.')
+      return
+    }
+    const name = window.prompt('Group name', conversation.name)
+    if (!name?.trim()) return
+    const { error } = await supabase.from('conversations').update({ name: name.trim() }).eq('id', conversation.id)
+    if (error) notify(error.message)
+    else { notify('Group name updated.'); await loadWorkspace() }
+  }
+
+  async function editGroupDescription(conversation) {
+    if (conversation.members.find((member) => member.id === session.user.id)?.role !== 'admin') {
+      notify('Only group admins can edit the description.')
+      return
+    }
+    const description = window.prompt('Group description', conversation.description || '')
+    if (description === null) return
+    const { error } = await supabase.from('conversations').update({ description: description.trim().slice(0, 300) }).eq('id', conversation.id)
+    if (error) notify(error.message)
+    else { notify('Group description updated.'); await loadWorkspace() }
+  }
+
+  async function promoteGroupMember(userId) {
+    if (activeConversation?.members.find((member) => member.id === session.user.id)?.role !== 'admin') {
+      notify('Only group admins can change member roles.')
+      return
+    }
+    const { error } = await supabase.from('conversation_members').update({ role: 'admin' })
+      .eq('conversation_id', activeId).eq('user_id', userId)
+    if (error) notify(error.message)
+    else { notify('Group admin added.'); await loadWorkspace() }
+  }
+
+  async function deleteGroup(conversation) {
+    if (conversation.created_by !== session.user.id ||
+      conversation.members.find((member) => member.id === session.user.id)?.role !== 'admin') {
+      notify('Only the group creator can delete this group.')
+      return
+    }
+    if (!window.confirm(`Delete "${conversation.name}" and its messages for everyone?`)) return
+    const { error } = await supabase.from('conversations').delete().eq('id', conversation.id)
+    if (error) notify(error.message)
+    else { setActiveId(null); setShowInfo(false); notify('Group deleted.'); await loadWorkspace() }
+  }
+
+  async function sendMessage(event) {
+    event?.preventDefault()
+    const content = draft.trim()
+    if (!content || !activeId || busy) return
+    setBusy(true)
+    const { error } = await supabase.from('messages').insert({
+      conversation_id: activeId, sender_id: session.user.id, content, type: 'text',
+      reply_to: replyTo?.id || null,
+    })
+    setBusy(false)
+    if (error) notify(error.message)
+    else { setDraft(''); setReplyTo(null); setShowEmoji(false); loadWorkspace() }
+  }
+
+  async function uploadFile(file) {
+    if (!file || !activeId) return
+    const allowed = new Set([
+      'image/jpeg', 'image/png', 'image/gif', 'image/webp', 'video/mp4', 'video/webm', 'video/quicktime',
+      'audio/mpeg', 'audio/mp4', 'audio/ogg', 'audio/webm', 'audio/wav', 'application/pdf', 'text/plain', 'text/csv',
+    ]).has(file.type)
+    if (!allowed) { notify('This file type is not supported.'); return }
+    if (file.size > 25 * 1024 * 1024) { notify('Files must be 25 MB or smaller.'); return }
+    setBusy(true)
+    const path = `${session.user.id}/${activeId}/${crypto.randomUUID()}-${file.name.replace(/[^\w.-]/g, '_')}`
+    const { error: storageError } = await supabase.storage.from('chat-files').upload(path, file, { upsert: false, contentType: file.type })
+    if (storageError) { notify(storageError.message); setBusy(false); return }
+    const kind = file.type.startsWith('image/') ? 'image' : file.type.startsWith('video/') ? 'video' : file.type.startsWith('audio/') ? 'audio' : 'file'
+    const { error } = await supabase.from('messages').insert({
+      conversation_id: activeId, sender_id: session.user.id,
+      content: file.name, type: kind, attachment_url: path,
+    })
+    setBusy(false)
+    if (error) notify(error.message)
+    else { setShowAttach(false); loadWorkspace() }
+  }
+
+  async function toggleVoiceRecording() {
+    if (recording) {
+      recorderRef.current?.stop()
+      streamRef.current?.getTracks().forEach((track) => track.stop())
+      setRecording(false)
+      return
+    }
+    if (!navigator.mediaDevices?.getUserMedia || !window.MediaRecorder) {
+      notify('Voice recording is not supported in this browser.')
+      return
+    }
+    let stream
+    try {
+      stream = await navigator.mediaDevices.getUserMedia({ audio: true })
+      const mimeType = ['audio/webm', 'audio/mp4'].find((type) => MediaRecorder.isTypeSupported(type))
+      const recorder = new MediaRecorder(stream, mimeType ? { mimeType } : undefined)
+      const chunks = []
+      recorder.ondataavailable = (event) => { if (event.data.size) chunks.push(event.data) }
+      recorder.onstop = () => {
+        const voiceNote = new File(chunks, `voice-note-${Date.now()}.${mimeType === 'audio/mp4' ? 'm4a' : 'webm'}`, { type: recorder.mimeType || 'audio/webm' })
+        if (voiceNote.size) uploadFile(voiceNote)
+        stream.getTracks().forEach((track) => track.stop())
+      }
+      streamRef.current = stream
+      recorderRef.current = recorder
+      recorder.start()
+      setRecording(true)
+    } catch (error) {
+      stream?.getTracks().forEach((track) => track.stop())
+      notify(error.message || 'Microphone access was not granted.')
+    }
+  }
+
+  async function reactTo(message, emoji) {
+    const ownReaction = message.message_reactions?.find((reaction) => reaction.user_id === session.user.id)
+    const result = ownReaction
+      ? await supabase.from('message_reactions').update({ emoji }).eq('id', ownReaction.id)
+      : await supabase.from('message_reactions').insert({ message_id: message.id, user_id: session.user.id, emoji })
+    if (result.error) notify(result.error.message)
+    else {
+      const { data } = await supabase.from('messages').select('*, profiles:sender_id(id, username, full_name, avatar_url), message_reactions(id, user_id, emoji), message_receipts(user_id, read_at)').eq('conversation_id', activeId).is('deleted_at', null).order('created_at')
+      const withSignedUrls = await Promise.all((data || []).map(async (item) => {
+        if (!item.attachment_url) return item
+        const { data: signed, error } = await supabase.storage.from('chat-files').createSignedUrl(item.attachment_url, 3600)
+        if (error) { notify(`Could not load attachment: ${error.message}`); return item }
+        return { ...item, attachment_path: item.attachment_url, attachment_url: signed.signedUrl }
+      }))
+      setMessages(withSignedUrls)
+    }
+  }
+
+  async function deleteMessage(message) {
+    const { error } = await supabase.from('messages').update({ deleted_at: new Date().toISOString(), content: 'This message was deleted' }).eq('id', message.id)
+    if (error) notify(error.message)
+  }
+
+  async function editMessage(message) {
+    const edited = window.prompt('Edit message', message.content)
+    if (!edited?.trim()) return
+    const { error } = await supabase.from('messages').update({ content: edited.trim(), edited_at: new Date().toISOString() }).eq('id', message.id)
+    if (error) notify(error.message)
+  }
+
+  async function forwardMessage(message) {
+    const target = window.prompt(`Forward to a conversation. Enter a contact username:\n${friends.map((friend) => `@${friend.username}`).join(', ')}`)
+    if (!target) return
+    const person = friends.find((friend) => friend.username.toLowerCase() === target.replace(/^@/, '').toLowerCase())
+    if (!person) { notify('That friend could not be found.'); return }
+    const { data: conversationId, error: dmError } = await supabase.rpc('get_or_create_dm', { other_user: person.id })
+    if (dmError) { notify(dmError.message); return }
+    let attachmentPath = null
+    if (message.attachment_path) {
+      const { data: file, error: downloadError } = await supabase.storage.from('chat-files').download(message.attachment_path)
+      if (downloadError) { notify(downloadError.message); return }
+      const filename = message.attachment_path.split('/').at(-1)?.replace(/[^\w.-]/g, '_') || crypto.randomUUID()
+      attachmentPath = `${session.user.id}/${conversationId}/${crypto.randomUUID()}-${filename}`
+      const { error: uploadError } = await supabase.storage.from('chat-files').upload(attachmentPath, file, { upsert: false })
+      if (uploadError) { notify(uploadError.message); return }
+    }
+    const { error } = await supabase.from('messages').insert({
+      conversation_id: conversationId, sender_id: session.user.id, content: message.content,
+      type: message.type, attachment_url: attachmentPath, forwarded_from: message.id,
+    })
+    if (error) notify(error.message)
+    else { notify(`Message forwarded to ${person.full_name}.`); loadWorkspace() }
+  }
+
+  async function signOut() {
+    const { error } = await supabase.auth.signOut()
+    if (error) notify(error.message)
+    else { setProfile(null); setConversations([]); setMessages([]) }
+  }
+
+  async function deleteAccount() {
+    const confirmed = window.prompt('This permanently deletes your account and chats. Type DELETE to confirm.')
+    if (confirmed !== 'DELETE') return
+    const { error } = await supabase.functions.invoke('delete-account', { body: { confirm: true } })
+    if (error) { notify(error.message); return }
+    await supabase.auth.signOut({ scope: 'local' })
+    notify('Your account has been deleted.')
+  }
+
+  if (!supabase) return <div className="setup-screen"><div className="setup-card"><div className="brand"><span className="brand-mark"><MessageCircle size={23} /></span> chatter</div><h1>Almost there.</h1><p>Add your Supabase project URL and anon key to a <code>.env</code> file to connect Chatter to its live backend.</p><pre>VITE_SUPABASE_URL=https://…supabase.co{'\n'}VITE_SUPABASE_ANON_KEY=…</pre><p>Then run <code>npm run dev</code>. See <a href="./README.md">README.md</a> for database setup.</p></div></div>
+  if (initializing) return <div className="loading-screen"><span className="spinner spinner-large" /><span>Getting things ready…</span></div>
+  if (!session) return <AuthScreen onAuthenticated={setSession} />
+  if (databaseSetupRequired) return <div className="setup-screen"><div className="setup-card">
+    <div className="brand"><span className="brand-mark"><MessageCircle size={23} /></span> chatter</div>
+    <h1>Connect your database.</h1>
+    <p>Authentication is working, but Chatter’s database tables are missing from this Supabase project. Messaging and profiles need the schema installed first.</p>
+    <ol className="database-setup-steps">
+      <li>Open your Supabase project and go to <strong>SQL Editor</strong>.</li>
+      <li>Open <code>supabase/schema.sql</code> in this project, copy its contents, and run them in SQL Editor.</li>
+      <li>Return here and retry. The schema creates the tables, security policies, realtime setup, and storage buckets.</li>
+    </ol>
+    <div className="database-setup-actions">
+      <button className="primary-button" onClick={loadWorkspace}>Retry database connection</button>
+      <button className="subtle-button" onClick={signOut}>Sign out</button>
+    </div>
+    <p className="database-setup-note">Run the SQL with a Supabase project owner account. Never put a service-role key in the website.</p>
+  </div></div>
+
+  const startTyping = () => typingChannel.current?.send({ type: 'broadcast', event: 'typing', payload: { userId: session.user.id, isTyping: true } })
+  const unreadTotal = conversations.reduce((sum, conversation) => sum + conversation.unread, 0)
+  const appClass = `app-shell ${activeConversation ? 'conversation-open' : ''}`
+
+  return (
+    <main className={appClass}>
+      <aside className={`sidebar ${showMobileMenu ? 'mobile-menu-open' : ''}`}>
+        <header className="sidebar-header">
+          <div className="brand"><span className="brand-mark"><MessageCircle size={21} /></span> chatter</div>
+          <div className="header-actions">
+            <button className="icon-button mobile-only" aria-label="Close menu" onClick={() => setShowMobileMenu(false)}><X size={19} /></button>
+            <button className="icon-button" aria-label="Notifications" onClick={() => setTab(tab === 'notifications' ? 'chats' : 'notifications')}><Bell size={18} />{notifications.some((item) => !item.read_at) && <i className="notification-dot" />}</button>
+            <button className="icon-button" aria-label="Settings" onClick={() => setShowSettings(true)}><Settings size={18} /></button>
+          </div>
+        </header>
+        <button className="workspace-switcher" onClick={() => notify('You’re viewing your personal workspace.')}>
+          <span className="workspace-mark">W</span>
+          <span><strong>My workspace</strong><small>Team messaging</small></span>
+          <ChevronDown size={15} />
+        </button>
+        <button className="my-profile" onClick={() => setShowProfile(true)}>
+          <Avatar profile={profile} online size="large" /><span className="my-profile-copy"><strong>{profile?.full_name || 'Your profile'}</strong><small>@{profile?.username || 'username'}</small></span><ChevronDown size={16} className="profile-chevron" />
+        </button>
+        <form className="search-box" onSubmit={(event) => { setTab('search'); setUserSearch(query); searchUsers(event, query) }}>
+          <Search size={17} /><input placeholder="Search messages or people" value={query} onChange={(event) => setQuery(event.target.value)} />
+          {query && <button type="button" className="clear-search" onClick={() => setQuery('')}><X size={14} /></button>}
+        </form>
+        <nav className="main-nav" aria-label="Main navigation">
+          <button className={tab === 'chats' ? 'nav-item selected' : 'nav-item'} onClick={() => setTab('chats')}><MessageCircle size={18} />Messages{unreadTotal > 0 && <span className="nav-badge">{unreadTotal}</span>}</button>
+          <button className={tab === 'contacts' ? 'nav-item selected' : 'nav-item'} onClick={() => setTab('contacts')}><Users size={18} />People<span className="nav-count">{friends.length}</span></button>
+          <button className={tab === 'requests' ? 'nav-item selected' : 'nav-item'} onClick={() => setTab('requests')}><ArrowDown size={18} />Requests{requests.length > 0 && <span className="nav-badge">{requests.length}</span>}</button>
+          <button className={tab === 'notifications' ? 'nav-item selected' : 'nav-item'} onClick={() => setTab('notifications')}><Bell size={18} />Activity{notifications.some((item) => !item.read_at) && <i className="nav-dot" />}</button>
+        </nav>
+        <div className="list-heading"><span>{tab === 'chats' ? 'DIRECT MESSAGES' : tab === 'contacts' ? 'TEAM CONTACTS' : tab === 'requests' ? 'INCOMING REQUESTS' : tab === 'search' ? 'FIND TEAMMATES' : tab === 'notifications' ? 'RECENT ACTIVITY' : 'DIRECT MESSAGES'}</span>{tab === 'chats' && <button className="icon-button small-icon" onClick={() => setShowGroup(true)} title="Create a group"><Plus size={17} /></button>}</div>
+        <div className="sidebar-list">
+          {tab === 'chats' && (filteredConversations.length ? filteredConversations.map((conversation) => {
+            const person = conversation.members?.find((member) => member.id !== session.user.id)
+            const selected = activeId === conversation.id
+            return <button className={`conversation-row ${selected ? 'conversation-selected' : ''}`} key={conversation.id} onClick={() => { setActiveId(conversation.id); setShowMobileMenu(false) }}>
+              <Avatar profile={conversation.is_group ? null : person} online={!conversation.is_group && person?.is_online} size="large" />
+              {conversation.is_group && <span className="group-avatar"><Users size={19} /></span>}
+              <span className="conversation-copy"><span className="conversation-title">{conversation.is_group ? conversation.name : person?.full_name || person?.username || 'Unknown user'}</span><span className="conversation-preview">{conversation.last_message?.sender_id === session.user.id ? 'You: ' : ''}{conversation.last_message?.content || (conversation.is_group ? 'Group conversation' : 'Say hello 👋')}</span></span>
+              <span className="conversation-meta"><time>{formatTime(conversation.last_message?.created_at || conversation.updated_at)}</time>{conversation.unread > 0 && <i className="unread-count">{conversation.unread}</i>}</span>
+            </button>
+          }) : <div className="empty-sidebar"><div className="empty-icon"><MessageCircle size={20} /></div><strong>{query ? 'No conversations found' : 'A quiet inbox'}</strong><span>{query ? 'Try another search.' : 'Find someone and start chatting.'}</span><button className="text-button" onClick={() => setTab('search')}>Find people <ArrowUpRight size={14} /></button></div>)}
+          {tab === 'contacts' && (friends.length ? friends.map((person) => <div className="contact-row" key={person.id}><button className="contact-open" onClick={() => openDirect(person)}><Avatar profile={person} online={person.is_online} /><span className="contact-copy"><strong>{person.full_name}</strong><small>@{person.username}</small></span><MessageCircle size={17} /></button><button className="contact-remove" title={`Remove ${person.full_name}`} onClick={() => removeFriend(person)}><X size={15} /></button></div>) : <div className="empty-sidebar"><div className="empty-icon"><Users size={20} /></div><strong>Your circle starts here</strong><span>Find people by username or Chatter ID.</span><button className="text-button" onClick={() => setTab('search')}>Find someone <ArrowUpRight size={14} /></button></div>)}
+          {tab === 'requests' && (requests.length ? requests.map((request) => <div className="request-row" key={request.id}><Avatar profile={request.profiles} /><span className="contact-copy"><strong>{request.profiles?.full_name}</strong><small>@{request.profiles?.username}</small></span><div className="request-actions"><button title="Accept request" disabled={busy} onClick={() => respondRequest(request, true)}><Check size={16} /></button><button title="Decline request" disabled={busy} onClick={() => respondRequest(request, false)}><X size={16} /></button></div></div>) : <div className="empty-sidebar"><div className="empty-icon"><ArrowDown size={20} /></div><strong>All caught up</strong><span>New friend requests will show up here.</span></div>)}
+          {tab === 'search' && <><form className="people-search" onSubmit={searchUsers}><Search size={17} /><input autoFocus value={userSearch} onChange={(event) => setUserSearch(event.target.value)} placeholder="Username or Chatter ID" /><button className="primary-button search-submit" disabled={searching}>{searching ? 'Searching…' : 'Search'}</button></form>{searchResults.map((person) => <div className="search-result" key={person.id}><Avatar profile={person} online={person.is_online} /><span className="contact-copy"><strong>{person.full_name}</strong><small>@{person.username} · {person.user_id} · {person.is_online ? 'Online' : person.last_seen_at ? `Seen ${formatTime(person.last_seen_at)}` : 'Offline'}</small></span><div className="result-actions"><button className="subtle-button" onClick={() => sendFriendRequest(person)} title="Add friend"><Plus size={16} /></button><button className="primary-button result-message" onClick={() => openDirect(person)}>Message</button></div></div>)}{!searching && userSearch && !searchResults.length && <div className="empty-sidebar"><strong>No one found</strong><span>Check the spelling or try their exact username or ID.</span></div>}<div className="search-hint"><Info size={14} />Search exact usernames or unique Chatter IDs.</div></>}
+          {tab === 'notifications' && (notifications.length ? notifications.map((notification) => <div className="activity-row" key={notification.id}><span className="activity-icon"><Bell size={15} /></span><span><strong>{notification.title || 'Chatter update'}</strong><small>{notification.body || notification.type}</small><small>{formatTime(notification.created_at)}</small></span></div>) : <div className="empty-sidebar"><div className="empty-icon"><Bell size={20} /></div><strong>Nothing new</strong><span>Your latest activity will appear here.</span></div>)}
+        </div>
+        <footer className="sidebar-footer"><div className="footer-status"><i />All systems ready</div><button className="footer-help" onClick={() => notify('Tip: search for a username or Chatter ID to find friends.')}><CircleHelp size={15} /> Help & tips</button></footer>
+      </aside>
+
+      <section className={`chat-area ${activeConversation ? 'chat-area-active' : ''}`}>
+        {activeConversation ? <>
+          <header className="chat-header">
+            <button className="icon-button back-button" onClick={() => setActiveId(null)} aria-label="Back to conversations"><ArrowLeft size={19} /></button>
+            {activeConversation.is_group ? <span className="group-avatar group-avatar-head"><Users size={18} /></span> : <Avatar profile={activeMember} online={activeMember?.is_online} />}
+            <button className="chat-person" onClick={() => setShowInfo(!showInfo)}><strong>{activeTitle}</strong><small>{activeConversation.is_group ? `${activeConversation.members?.length || 0} members` : activeMember?.is_online ? 'Online now' : activeStatus?.last_seen_at ? `Last seen ${formatTime(activeStatus.last_seen_at)}` : 'Offline'}</small></button>
+            <div className="chat-header-actions"><button className="icon-button" title="Search messages" onClick={() => { const term = window.prompt('Search in this conversation'); if (term) { const result = messages.find((message) => message.content?.toLowerCase().includes(term.toLowerCase())); if (result) document.getElementById(`message-${result.id}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' }); else notify('No matching messages in the loaded conversation.') } }}><Search size={18} /></button><button className="icon-button" onClick={() => setShowInfo(!showInfo)} title="Conversation details"><MoreHorizontal size={19} /></button></div>
+          </header>
+          <div className="chat-canvas">
+            <div className="conversation-date"><span>TODAY</span></div>
+            {messages.length === 0 && <div className="chat-empty"><span className="chat-empty-icon">{activeConversation.is_group ? <Users size={24} /> : <MessageCircle size={24} />}</span><strong>This is the start of something good.</strong><span>Say hello to {activeTitle}.</span></div>}
+            {messages.map((message, index) => {
+              const own = message.sender_id === session.user.id
+              const previous = messages[index - 1]
+              const grouped = previous?.sender_id === message.sender_id && new Date(message.created_at) - new Date(previous.created_at) < 300000
+              const delivered = own && message.message_receipts?.some((receipt) => receipt.user_id !== session.user.id)
+              const seen = own && message.message_receipts?.some((receipt) => receipt.user_id !== session.user.id && receipt.read_at)
+              return <div className={`message-line ${own ? 'message-own' : ''} ${grouped ? 'message-grouped' : ''}`} key={message.id} id={`message-${message.id}`}>
+                {!own && !grouped && <Avatar profile={message.profiles} size="tiny" />}
+                {!own && grouped && <span className="avatar-spacer" />}
+                <div className="message-content-wrap">
+                  {!own && !grouped && <span className="message-sender">{message.profiles?.full_name || 'Member'}</span>}
+                  {message.reply_to && <div className="reply-quote">{(() => {
+                    const original = messages.find((item) => item.id === message.reply_to)
+                    return original ? `Replying to ${original.profiles?.full_name || 'a message'}: ${original.content}` : 'Replying to an earlier message'
+                  })()}</div>}
+                  {message.type === 'image' && <a href={message.attachment_url} target="_blank" rel="noreferrer"><img className="message-image" src={message.attachment_url} alt={message.content} /></a>}
+                  {message.type === 'video' && <video className="message-video" src={message.attachment_url} controls />}
+                  {message.type === 'audio' && <audio src={message.attachment_url} controls />}
+                  {message.type === 'file' && <a className="file-attachment" href={message.attachment_url} target="_blank" rel="noreferrer"><FileText size={20} /><span>{message.content}<small>Open attachment</small></span></a>}
+                  {message.type === 'text' && <div className="message-bubble"><span>{message.content}</span>{message.edited_at && <small className="edited-label">edited</small>}</div>}
+                  <div className="message-meta"><time>{formatTime(message.created_at)}</time>{own && (seen ? <CheckCheck size={14} className="seen-check" /> : delivered ? <CheckCheck size={14} /> : <Check size={14} />)}</div>
+                  {message.message_reactions?.length > 0 && <div className="reaction-list">{message.message_reactions.map((reaction) => <button key={reaction.id} onClick={() => reactTo(message, reaction.emoji)}>{reaction.emoji}</button>)}</div>}
+                  <div className="message-hover-actions"><button title="Reply" onClick={() => setReplyTo(message)}><MessageCircle size={14} /></button><button title="React" onClick={() => reactTo(message, '❤️')}><Smile size={14} /></button><button title="Forward" onClick={() => forwardMessage(message)}><ArrowUpRight size={14} /></button>{own && <><button title="Edit" onClick={() => editMessage(message)}><MoreHorizontal size={14} /></button><button title="Delete for everyone" onClick={() => deleteMessage(message)}><X size={14} /></button></>}</div>
+                </div>
+              </div>
+            })}
+            {Object.entries(typingUsers).some(([userId, isTyping]) => isTyping && userId !== session.user.id) && <div className="typing-indicator"><i /><i /><i /><span>{activeTitle} is typing</span></div>}
+            <div ref={bottomRef} />
+          </div>
+          <form className="composer" onSubmit={sendMessage}>
+            {replyTo && <div className="replying-to"><span><strong>Replying to {replyTo.profiles?.full_name || 'yourself'}</strong><small>{replyTo.content}</small></span><button type="button" className="icon-button" onClick={() => setReplyTo(null)}><X size={16} /></button></div>}
+            {showEmoji && <div className="emoji-panel">{EMOJIS.map((emoji) => <button type="button" key={emoji} onClick={() => setDraft((current) => current + emoji)}>{emoji}</button>)}</div>}
+            {showAttach && <div className="attach-panel"><button type="button" onClick={() => { fileRef.current.accept = 'image/*'; fileRef.current.click() }}><span className="attach-image"><Image size={17} /></span>Photo or video</button><button type="button" onClick={() => { fileRef.current.accept = '*/*'; fileRef.current.click() }}><span className="attach-file"><File size={17} /></span>Document</button></div>}
+            <input ref={fileRef} hidden type="file" onChange={(event) => { uploadFile(event.target.files?.[0]); event.target.value = '' }} />
+            <button type="button" className={`composer-icon ${showAttach ? 'composer-active' : ''}`} onClick={() => { setShowAttach(!showAttach); setShowEmoji(false) }} title="Attach file"><Paperclip size={19} /></button>
+            <div className="composer-input"><input value={draft} onChange={(event) => { setDraft(event.target.value); startTyping() }} placeholder="Write a message..." aria-label="Write a message" /><button type="button" className="composer-icon emoji-button" onClick={() => { setShowEmoji(!showEmoji); setShowAttach(false) }} title="Add emoji"><Smile size={19} /></button></div>
+            {!draft.trim() && <button type="button" className={`composer-icon voice-button ${recording ? 'recording' : ''}`} onClick={toggleVoiceRecording} title={recording ? 'Stop voice message' : 'Record voice message'}><Mic size={18} /></button>}
+            <button className="send-button" disabled={!draft.trim() || busy} aria-label="Send message"><Send size={18} /></button>
+          </form>
+        </> : <div className="welcome-panel">
+          <header className="workspace-topbar">
+            <button className="icon-button mobile-menu-button" onClick={() => setShowMobileMenu(true)} aria-label="Open workspace menu"><Menu size={19} /></button>
+            <span>Workspace <b>/</b> <strong>Messages</strong></span>
+            <span className="workspace-secure"><i />Private workspace</span>
+          </header>
+          <div className="welcome-content">
+            <div className="welcome-illustration"><div className="welcome-ring ring-one" /><div className="welcome-ring ring-two" /><span className="welcome-message"><MessageCircle size={34} /></span><span className="float-dot dot-a">✦</span><span className="float-dot dot-b">✳</span><span className="float-dot dot-c">•</span></div>
+            <div className="welcome-copy">
+              <span className="eyebrow">YOUR TEAM, IN SYNC</span>
+              <h1>Work moves forward<br />when everyone’s <em>in.</em></h1>
+              <p>Bring your team’s conversations together. Start a direct message or create a group to keep work moving.</p>
+              <div className="welcome-actions">
+                <button className="primary-button welcome-cta" onClick={() => { setTab('search'); setShowMobileMenu(true) }}><Plus size={16} />Start a conversation</button>
+                <button className="welcome-secondary" onClick={() => setShowGroup(true)}><Users size={16} />Create a group</button>
+              </div>
+              <div className="workspace-summary">
+                <button onClick={() => setTab('chats')}><MessageCircle size={16} /><span><strong>{conversations.length}</strong><small>Conversations</small></span></button>
+                <button onClick={() => setTab('contacts')}><Users size={16} /><span><strong>{friends.length}</strong><small>Team contacts</small></span></button>
+                <button onClick={() => setTab('requests')}><ArrowDown size={16} /><span><strong>{requests.length}</strong><small>Open requests</small></span></button>
+              </div>
+            </div>
+          </div>
+          <span className="welcome-tip"><span>✦</span> Your conversations are private to the people in each chat.</span>
+        </div>}
+      </section>
+      {showInfo && activeConversation && <aside className="info-panel"><header><strong>Details</strong><button className="icon-button" onClick={() => setShowInfo(false)}><X size={18} /></button></header><div className="info-person">{activeConversation.is_group ? <span className="group-avatar group-avatar-xl"><Users size={25} /></span> : <Avatar profile={activeMember} size="xl" online={activeMember?.is_online} />}<strong>{activeTitle}</strong><span>{activeConversation.is_group ? `Group · ${activeConversation.members?.length || 0} members` : `@${activeMember?.username}`}</span>{!activeConversation.is_group && activeMember?.user_id && <><small>Chatter ID · {activeMember.user_id}</small><small>{activeMember.is_online ? 'Online now' : activeStatus?.last_seen_at ? `Last seen ${formatTime(activeStatus.last_seen_at)}` : 'Offline'}</small></>}</div>{activeConversation.is_group && <div className="info-members"><h4>MEMBERS</h4>{activeConversation.members?.map((member) => <div key={member.id}><Avatar profile={member} size="small" online={member.is_online} /><span>{member.full_name}<small>{member.id === session.user.id ? 'You' : `@${member.username}`} {member.role === 'admin' ? '· Admin' : ''}</small></span>{activeConversation.members.find((item) => item.id === session.user.id)?.role === 'admin' && member.id !== session.user.id && <><button className="text-button" onClick={() => promoteGroupMember(member.id)}>Make admin</button><button className="text-button" onClick={() => removeGroupMember(member.id)}>Remove</button></>}</div>)}{activeConversation.members.find((item) => item.id === session.user.id)?.role === 'admin' && friends.filter((friend) => !activeConversation.members.some((member) => member.id === friend.id)).length > 0 && <div className="info-add-members">{friends.filter((friend) => !activeConversation.members.some((member) => member.id === friend.id)).map((friend) => <button key={friend.id} className="text-button" onClick={() => addGroupMember(friend.id)}><Plus size={13} />Add {friend.full_name}</button>)}</div>}</div>}{activeConversation.is_group ? <div className="info-meta group-admin-actions"><p>{activeConversation.description || 'No group description yet.'}</p><button className="subtle-button" onClick={() => renameGroup(activeConversation)}>Rename group</button>{activeConversation.members.find((item) => item.id === session.user.id)?.role === 'admin' && <button className="subtle-button" onClick={() => editGroupDescription(activeConversation)}>Edit description</button>}<button className="subtle-button" onClick={() => removeGroupMember(session.user.id)}>Leave group</button>{activeConversation.created_by === session.user.id && <button className="subtle-button danger-action" onClick={() => deleteGroup(activeConversation)}>Delete group</button>}</div> : <div className="info-meta"><span><Info size={16} />About</span><p>{activeMember?.bio || 'Making room for good conversations.'}</p><button className="subtle-button danger-action" onClick={() => blockUser(activeMember.id)}>Block user</button></div>}</aside>}
+      {showProfile && <ProfileModal profile={profile} email={session.user.email} onClose={() => setShowProfile(false)} onSave={async (updates) => {
+        const { data, error } = await supabase.from('profiles').update(updates).eq('id', session.user.id).select('id,user_id,username,full_name,bio,avatar_url,discoverable,show_online_status,show_last_seen,created_at').single()
+        if (error) { notify(error.message); return false }
+        setProfile(data); await loadWorkspace(); return true
+      }} notify={notify} />}
+      {showSettings && <SettingsModal profile={profile} email={session.user.email} blockedUsers={blockedUsers} onUnblock={unblockUser} onDeleteAccount={deleteAccount} onClose={() => setShowSettings(false)} onSignOut={signOut} onSave={async (updates) => {
+        const { data, error } = await supabase.from('profiles').update(updates).eq('id', session.user.id).select('id,user_id,username,full_name,bio,avatar_url,discoverable,show_online_status,show_last_seen,created_at').single()
+        if (error) { notify(error.message); return false }
+        setProfile(data); await loadWorkspace(); return true
+      }} theme={theme} setTheme={setTheme} notify={notify} notificationsEnabled={notificationsEnabled} setNotificationsEnabled={setNotificationsEnabled} />}
+      {showGroup && <GroupModal friends={friends} onClose={() => setShowGroup(false)} onCreate={createGroup} busy={busy} />}
+      {toast && <div className="toast"><span className="toast-check"><Check size={14} /></span>{toast}</div>}
+      <nav className="mobile-bottom-nav"><button onClick={() => { setTab('chats'); setActiveId(null) }} className={tab === 'chats' ? 'mobile-nav-selected' : ''}><MessageCircle size={19} /><span>Chats</span></button><button onClick={() => { setTab('contacts'); setActiveId(null) }} className={tab === 'contacts' ? 'mobile-nav-selected' : ''}><Users size={19} /><span>People</span></button><button onClick={() => { setTab('search'); setActiveId(null) }} className={tab === 'search' ? 'mobile-nav-selected' : ''}><Search size={19} /><span>Discover</span></button><button onClick={() => setShowSettings(true)}><Settings size={19} /><span>Settings</span></button></nav>
+    </main>
+  )
+}
+
+function ProfileModal({ profile, email, onClose, onSave, notify }) {
+  const [form, setForm] = useState({ full_name: profile?.full_name || '', username: profile?.username || '', bio: profile?.bio || '' })
+  const [saving, setSaving] = useState(false)
+  const [avatarBusy, setAvatarBusy] = useState(false)
+  const avatarInput = useRef(null)
+
+  async function save(event) {
+    event.preventDefault()
+    setSaving(true)
+    const success = await onSave({
+      full_name: form.full_name.trim(),
+      username: form.username.trim().replace(/^@/, '').toLowerCase(),
+      bio: form.bio.trim(),
+    })
+    setSaving(false)
+    if (success) { notify('Profile updated.'); onClose() }
+  }
+
+  async function uploadAvatar(file) {
+    if (!file || !profile?.id) return
+    if (!file.type.startsWith('image/') || file.size > 5 * 1024 * 1024) {
+      notify('Choose an image smaller than 5 MB.')
+      return
+    }
+    setAvatarBusy(true)
+    const path = `${profile.id}/${crypto.randomUUID()}-${file.name.replace(/[^\w.-]/g, '_')}`
+    const { error } = await supabase.storage.from('avatars').upload(path, file, { contentType: file.type })
+    if (error) { notify(error.message); setAvatarBusy(false); return }
+    const { data } = supabase.storage.from('avatars').getPublicUrl(path)
+    const success = await onSave({ avatar_url: data.publicUrl })
+    setAvatarBusy(false)
+    if (success) notify('Profile photo updated.')
+  }
+
+  return <div className="modal-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose() }}>
+    <section className="profile-modal profile-view">
+      <header className="modal-header"><div><span className="eyebrow">YOUR ACCOUNT</span><h2>My profile</h2></div><button className="icon-button" onClick={onClose} aria-label="Close profile"><X size={19} /></button></header>
+      <div className="profile-identity">
+        <Avatar profile={profile} size="xl" />
+        <div><h3>{profile?.full_name || 'Your name'}</h3><p>@{profile?.username}</p><button className="subtle-button" type="button" onClick={() => avatarInput.current?.click()}>{avatarBusy ? 'Uploading…' : 'Change photo'}</button></div>
+        <input ref={avatarInput} hidden type="file" accept="image/*" onChange={(event) => { uploadAvatar(event.target.files?.[0]); event.target.value = '' }} />
+      </div>
+      <form className="settings-form profile-edit-form" onSubmit={save}>
+        <label>Full name<input required value={form.full_name} maxLength="80" onChange={(event) => setForm({ ...form, full_name: event.target.value })} /></label>
+        <label>Username<div className="input-prefix"><span>@</span><input required pattern="[A-Za-z0-9_]{3,24}" maxLength="24" value={form.username} onChange={(event) => setForm({ ...form, username: event.target.value })} /></div></label>
+        <label>About<textarea rows="3" maxLength="160" value={form.bio} onChange={(event) => setForm({ ...form, bio: event.target.value })} placeholder="A little about you..." /></label>
+        <div className="profile-details">
+          <div><span>CHATTER ID</span><strong>{profile?.user_id || '—'}</strong></div>
+          <div><span>EMAIL ADDRESS</span><strong>{email || '—'}</strong></div>
+          <div><span>MEMBER SINCE</span><strong>{profile?.created_at ? new Intl.DateTimeFormat(undefined, { dateStyle: 'medium' }).format(new Date(profile.created_at)) : '—'}</strong></div>
+        </div>
+        <div className="modal-actions"><button type="button" className="subtle-button" onClick={onClose}>Cancel</button><button className="primary-button" disabled={saving}>{saving ? 'Saving…' : 'Save profile'}</button></div>
+      </form>
+    </section>
+  </div>
+}
+
+function SettingsModal({ profile, email, blockedUsers, onUnblock, onDeleteAccount, onClose, onSignOut, onSave, theme, setTheme, notify, notificationsEnabled, setNotificationsEnabled }) {
+  const [section, setSection] = useState('privacy')
+  const [form, setForm] = useState({
+    discoverable: profile?.discoverable ?? true,
+    show_online_status: profile?.show_online_status ?? true,
+    show_last_seen: profile?.show_last_seen ?? true,
+  })
+  const [saving, setSaving] = useState(false)
+  const [changingPassword, setChangingPassword] = useState(false)
+  const [password, setPassword] = useState('')
+
+  async function savePrivacy(event) {
+    event.preventDefault()
+    setSaving(true)
+    const success = await onSave(form)
+    setSaving(false)
+    if (success) notify('Privacy settings updated.')
+  }
+
+  async function updatePassword(event) {
+    event.preventDefault()
+    setChangingPassword(true)
+    const { error } = await supabase.auth.updateUser({ password })
+    setChangingPassword(false)
+    if (error) notify(error.message)
+    else { notify('Password updated.'); setPassword('') }
+  }
+
+  const sections = [
+    { id: 'privacy', title: 'Privacy & visibility', icon: Users },
+    { id: 'notifications', title: 'Notifications', icon: Bell },
+    { id: 'appearance', title: 'Appearance', icon: MessageCircle },
+    { id: 'security', title: 'Security', icon: Settings },
+    { id: 'blocked', title: 'Blocked people', icon: X },
+    { id: 'account', title: 'Account', icon: Info },
+  ]
+  const headings = {
+    privacy: ['Privacy & visibility', 'Control what other people can see.'],
+    notifications: ['Notifications', 'Choose how Chatter keeps you in the loop.'],
+    appearance: ['Appearance', 'Personalize how Chatter looks on this device.'],
+    security: ['Security', 'Manage your password and sign-in security.'],
+    blocked: ['Blocked people', 'Review the accounts you have blocked.'],
+    account: ['Account', 'Account details and sign-in actions.'],
+  }
+
+  return <div className="modal-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose() }}>
+    <section className="settings-window">
+      <header className="settings-topbar">
+        <div><span className="settings-app-mark"><Settings size={16} /></span><strong>Settings</strong><span className="settings-divider">/</span><span>{headings[section][0]}</span></div>
+        <button className="icon-button" onClick={onClose} aria-label="Close settings"><X size={19} /></button>
+      </header>
+      <div className="settings-layout">
+        <nav className="settings-nav" aria-label="Settings sections">
+          <span className="settings-nav-heading">PREFERENCES</span>
+          {sections.map(({ id, title, icon: Icon }) => <button key={id} className={section === id ? 'settings-nav-item settings-nav-selected' : 'settings-nav-item'} onClick={() => setSection(id)}><Icon size={16} />{title}</button>)}
+          <div className="settings-nav-account"><Avatar profile={profile} size="small" /><span><strong>{profile?.full_name}</strong><small>@{profile?.username}</small></span></div>
+        </nav>
+        <div className="settings-content">
+          <div className="settings-section-heading"><h2>{headings[section][0]}</h2><p>{headings[section][1]}</p></div>
+          {section === 'privacy' && <form className="settings-options" onSubmit={savePrivacy}>
+            <label className="setting-option"><span><strong>Profile discoverability</strong><small>Allow people to find you by username or Chatter ID.</small></span><input type="checkbox" checked={form.discoverable} onChange={(event) => setForm({ ...form, discoverable: event.target.checked })} /></label>
+            <label className="setting-option"><span><strong>Online status</strong><small>Show your teammates when you’re currently online.</small></span><input type="checkbox" checked={form.show_online_status} onChange={(event) => setForm({ ...form, show_online_status: event.target.checked })} /></label>
+            <label className="setting-option"><span><strong>Last seen</strong><small>Show when you were last active to other people.</small></span><input type="checkbox" checked={form.show_last_seen} onChange={(event) => setForm({ ...form, show_last_seen: event.target.checked })} /></label>
+            <div className="settings-save-row"><button className="primary-button" disabled={saving}>{saving ? 'Saving…' : 'Save changes'}</button></div>
+          </form>}
+          {section === 'notifications' && <div className="settings-options">
+            <label className="setting-option"><span><strong>Browser notifications</strong><small>Show a notification when new activity arrives.</small></span><input type="checkbox" checked={notificationsEnabled} onChange={async (event) => {
+              if (!event.target.checked) { setNotificationsEnabled(false); return }
+              if (!('Notification' in window)) { notify('This browser does not support notifications.'); return }
+              const permission = Notification.permission === 'granted' ? 'granted' : await Notification.requestPermission()
+              if (permission === 'granted') setNotificationsEnabled(true)
+              else notify('Browser notification permission was not granted.')
+            }} /></label>
+            <div className="settings-info-card"><Bell size={17} /><span>Desktop notifications appear only while Chatter is open and browser permission is enabled.</span></div>
+          </div>}
+          {section === 'appearance' && <div className="settings-options">
+            <div className="setting-option"><span><strong>Theme</strong><small>Choose the appearance used on this device.</small></span><div className="theme-choice"><button className={theme === 'light' ? 'theme-choice-selected' : ''} onClick={() => setTheme('light')}><span className="theme-preview theme-preview-light" />Light</button><button className={theme === 'dark' ? 'theme-choice-selected' : ''} onClick={() => setTheme('dark')}><span className="theme-preview theme-preview-dark" />Dark</button></div></div>
+          </div>}
+          {section === 'security' && <form className="settings-options" onSubmit={updatePassword}>
+            <div className="settings-info-card"><Settings size={17} /><span>Password changes are securely handled by Supabase Authentication.</span></div>
+            <label className="settings-field">New password<input required type="password" minLength="8" autoComplete="new-password" value={password} placeholder="At least 8 characters" onChange={(event) => setPassword(event.target.value)} /></label>
+            <div className="settings-save-row"><button className="primary-button" disabled={changingPassword}>{changingPassword ? 'Updating…' : 'Update password'}</button></div>
+          </form>}
+          {section === 'blocked' && <div className="settings-options">{blockedUsers.length ? <div className="blocked-list settings-blocked-list">{blockedUsers.map((userId) => <div key={userId}><span><strong>{userId}</strong><small>Blocked account</small></span><button type="button" className="subtle-button" onClick={() => onUnblock(userId)}>Unblock</button></div>)}</div> : <div className="settings-empty"><span><Users size={20} /></span><strong>No blocked accounts</strong><small>People you block will appear here.</small></div>}</div>}
+          {section === 'account' && <div className="settings-options">
+            <div className="account-summary"><Avatar profile={profile} /><span><strong>{profile?.full_name}</strong><small>{email}</small></span></div>
+            <div className="settings-info-card"><Info size={17} /><span>Your Chatter ID: <strong>{profile?.user_id}</strong></span></div>
+            <button type="button" className="subtle-button account-signout" onClick={onSignOut}><LogOut size={15} />Sign out of Chatter</button>
+            <div className="account-danger-zone"><strong>Delete account</strong><p>Permanently delete your account, profile, and chat history.</p><button type="button" className="subtle-button danger-action" onClick={onDeleteAccount}>Delete my account</button></div>
+          </div>}
+        </div>
+      </div>
+    </section>
+  </div>
+}
+
+function GroupModal({ friends, onClose, onCreate, busy }) {
+  const [name, setName] = useState('')
+  const [selected, setSelected] = useState([])
+  return <div className="modal-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose() }}><form className="group-modal" onSubmit={(event) => { event.preventDefault(); if (name.trim()) onCreate(name, selected) }}>
+    <header className="modal-header"><div><span className="eyebrow">BRING YOUR PEOPLE TOGETHER</span><h2>Create a group</h2></div><button type="button" className="icon-button" onClick={onClose}><X size={19} /></button></header>
+    <label>Group name<input required autoFocus value={name} onChange={(event) => setName(event.target.value)} placeholder="e.g. Weekend plans" maxLength="80" /></label>
+    <div className="group-friends-title">ADD FRIENDS <span>{selected.length} selected</span></div>
+    <div className="group-friends-list">{friends.length ? friends.map((friend) => <label className="group-friend" key={friend.id}><Avatar profile={friend} /><span><strong>{friend.full_name}</strong><small>@{friend.username}</small></span><input type="checkbox" checked={selected.includes(friend.id)} onChange={(event) => setSelected(event.target.checked ? [...selected, friend.id] : selected.filter((id) => id !== friend.id))} /></label>) : <div className="group-no-friends">Add some friends before creating a group.</div>}</div>
+    <div className="modal-actions"><button type="button" className="subtle-button" onClick={onClose}>Cancel</button><button className="primary-button" disabled={!name.trim() || !selected.length || busy}>{busy ? 'Creating…' : 'Create group'}</button></div>
+  </form></div>
+}
+
+export default App
