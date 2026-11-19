@@ -214,6 +214,8 @@ function App() {
   const [typingUsers, setTypingUsers] = useState({})
   const bottomRef = useRef(null)
   const chatCanvasRef = useRef(null)
+  const activeIdRef = useRef(activeId)
+  const messagesRef = useRef(messages)
   const fileRef = useRef(null)
   const typingChannel = useRef(null)
   const recorderRef = useRef(null)
@@ -221,6 +223,8 @@ function App() {
   const onlineUserIds = useRef(new Set())
   const notificationsEnabledRef = useRef(notificationsEnabled)
 
+  activeIdRef.current = activeId
+  messagesRef.current = messages
   useEffect(() => { notificationsEnabledRef.current = notificationsEnabled }, [notificationsEnabled])
 
   const activeConversation = conversations.find((conversation) => conversation.id === activeId)
@@ -289,8 +293,33 @@ function App() {
       setDatabaseSetupRequired(true)
       return
     }
-    for (const loadError of [convError, summaryError, friendError, requestError, notificationError, blockedError]) if (loadError) notify(loadError.message)
-    const summariesById = new Map((summaryRows || []).map((summary) => [summary.conversation_id, summary]))
+    for (const loadError of [convError, friendError, requestError, notificationError, blockedError]) if (loadError) notify(loadError.message)
+    let availableSummaries = summaryRows || []
+    if (summaryError?.code === 'PGRST202') {
+      const { data: legacyRows, error: legacyError } = await supabase.from('conversation_members')
+        .select('conversation_id, last_read_at, conversations(id, messages(id, content, created_at, sender_id, deleted_at))')
+        .eq('user_id', user.id)
+      if (legacyError) notify(legacyError.message)
+      else {
+        availableSummaries = (legacyRows || []).map((row) => {
+          const messages = (row.conversations?.messages || [])
+            .filter((message) => !message.deleted_at)
+            .sort((a, b) => new Date(a.created_at) - new Date(b.created_at) || a.id.localeCompare(b.id))
+          const latest = messages.at(-1)
+          return {
+            conversation_id: row.conversation_id,
+            last_message_id: latest?.id,
+            last_message_content: latest?.content,
+            last_message_created_at: latest?.created_at,
+            last_message_sender_id: latest?.sender_id,
+            unread_count: messages.filter((message) => message.sender_id !== user.id &&
+              (!row.last_read_at || new Date(message.created_at) > new Date(row.last_read_at))).length,
+          }
+        })
+        notify('Chat database migration is missing. Chats are loading in compatibility mode; apply the chat migration to restore optimized summaries and pinning.')
+      }
+    } else if (summaryError) notify(summaryError.message)
+    const summariesById = new Map(availableSummaries.map((summary) => [summary.conversation_id, summary]))
     const seen = new Set()
     const normalized = (memberRows || []).flatMap((row) => {
       const conversation = row.conversations
@@ -324,14 +353,30 @@ function App() {
   useEffect(() => {
     if (!session?.user || !supabase) return
     const channel = supabase.channel(`workspace-${session.user.id}`)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'messages' }, () => loadWorkspace())
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'messages' }, ({ new: message }) => {
+        if (!message?.conversation_id) return
+        setConversations((current) => current.map((conversation) => {
+          if (conversation.id !== message.conversation_id) return conversation
+          const isIncoming = message.sender_id !== session.user.id
+          const isOpen = activeIdRef.current === conversation.id
+          return {
+            ...conversation,
+            updated_at: message.created_at,
+            last_message: message,
+            unread: isIncoming && !isOpen ? conversation.unread + 1 : conversation.unread,
+          }
+        }).sort((a, b) => new Date(b.updated_at) - new Date(a.updated_at)))
+      })
       .on('postgres_changes', { event: '*', schema: 'public', table: 'friend_requests', filter: `receiver_id=eq.${session.user.id}` }, () => loadWorkspace())
       .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'notifications', filter: `user_id=eq.${session.user.id}` }, (payload) => {
         setNotifications((current) => [payload.new, ...current])
         if (notificationsEnabledRef.current && 'Notification' in window && Notification.permission === 'granted') {
-          new Notification(payload.new.title || 'Chatter', { body: payload.new.body || 'You have a new update.' })
+          new Notification(payload.new.title || 'Chatter', {
+            body: payload.new.body || 'You have a new update.',
+            silent: true,
+            tag: payload.new.id,
+          })
         }
-        notify(payload.new.title || 'You have a new notification')
       })
       .subscribe()
     const presence = supabase.channel('online-presence', { config: { presence: { key: session.user.id } } })
@@ -379,6 +424,51 @@ function App() {
   useEffect(() => {
     if (!activeId || !session?.user) { setMessages([]); setHasOlderMessages(false); return }
     let alive = true
+    const pendingRefreshes = new Set()
+    let refreshTimer
+    async function refreshRealtimeMessage(messageId) {
+      if (!messageId || !alive) return
+      const { data, error } = await supabase.from('messages')
+        .select('*, profiles:sender_id(id, username, full_name, avatar_url), message_reactions(id, user_id, emoji), message_receipts(user_id, read_at)')
+        .eq('id', messageId).eq('conversation_id', activeId).is('deleted_at', null).maybeSingle()
+      if (error) { notify(error.message); return }
+      if (!alive) return
+      if (!data) {
+        setMessages((current) => current.filter((message) => message.id !== messageId))
+        return
+      }
+      const [updatedMessage] = await addSignedAttachmentUrls([data], notify)
+      setMessages((current) => {
+        if (!current.some((message) => message.id === messageId)) {
+          return [...current, updatedMessage].sort((a, b) => new Date(a.created_at) - new Date(b.created_at) || a.id.localeCompare(b.id))
+        }
+        return current.map((message) => message.id === messageId ? updatedMessage : message)
+      })
+    }
+    async function refreshRealtimeMessages(messageIds) {
+      const ids = [...new Set(messageIds)].filter((id) => messagesRef.current.some((message) => message.id === id))
+      if (!ids.length || !alive) return
+      const { data, error } = await supabase.from('messages')
+        .select('*, profiles:sender_id(id, username, full_name, avatar_url), message_reactions(id, user_id, emoji), message_receipts(user_id, read_at)')
+        .eq('conversation_id', activeId).is('deleted_at', null).in('id', ids)
+      if (error) { notify(error.message); return }
+      if (!alive) return
+      const refreshed = await addSignedAttachmentUrls(data || [], notify)
+      const refreshedById = new Map(refreshed.map((message) => [message.id, message]))
+      setMessages((current) => current
+        .filter((message) => !ids.includes(message.id) || refreshedById.has(message.id))
+        .map((message) => refreshedById.get(message.id) || message))
+    }
+    function queueMessageRefresh(messageId) {
+      if (!messageId || !messagesRef.current.some((message) => message.id === messageId)) return
+      pendingRefreshes.add(messageId)
+      window.clearTimeout(refreshTimer)
+      refreshTimer = window.setTimeout(() => {
+        const ids = [...pendingRefreshes]
+        pendingRefreshes.clear()
+        refreshRealtimeMessages(ids)
+      }, 120)
+    }
     async function loadMessages() {
       const { data, error } = await supabase.from('messages')
         .select('*, profiles:sender_id(id, username, full_name, avatar_url), message_reactions(id, user_id, emoji), message_receipts(user_id, read_at)')
@@ -411,16 +501,22 @@ function App() {
     setHasOlderMessages(false)
     loadMessages()
     const channel = supabase.channel(`messages-${activeId}`)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'messages', filter: `conversation_id=eq.${activeId}` }, loadMessages)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'message_reactions' }, loadMessages)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'message_receipts' }, loadMessages)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'messages', filter: `conversation_id=eq.${activeId}` }, (payload) => {
+        refreshRealtimeMessage(payload.new?.id || payload.old?.id)
+      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'message_reactions' }, (payload) => {
+        queueMessageRefresh(payload.new?.message_id || payload.old?.message_id)
+      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'message_receipts' }, (payload) => {
+        queueMessageRefresh(payload.new?.message_id || payload.old?.message_id)
+      })
       .subscribe()
     typingChannel.current = supabase.channel(`typing-${activeId}`)
       .on('broadcast', { event: 'typing' }, ({ payload }) => {
         setTypingUsers((current) => ({ ...current, [payload.userId]: payload.isTyping }))
         window.setTimeout(() => setTypingUsers((current) => ({ ...current, [payload.userId]: false })), 2500)
       }).subscribe()
-    return () => { alive = false; supabase.removeChannel(channel); if (typingChannel.current) supabase.removeChannel(typingChannel.current) }
+    return () => { alive = false; window.clearTimeout(refreshTimer); supabase.removeChannel(channel); if (typingChannel.current) supabase.removeChannel(typingChannel.current) }
   }, [activeId, session, notify])
 
   useEffect(() => {
@@ -699,14 +795,57 @@ function App() {
     event?.preventDefault()
     const content = draft.trim()
     if (!content || !activeId || busy) return
-    setBusy(true)
-    const { error } = await supabase.from('messages').insert({
-      conversation_id: activeId, sender_id: session.user.id, content, type: 'text',
+    const conversationId = activeId
+    const messageId = crypto.randomUUID()
+    const createdAt = new Date().toISOString()
+    const previousConversation = conversations.find((conversation) => conversation.id === conversationId)
+    const optimisticMessage = {
+      id: messageId,
+      conversation_id: conversationId,
+      sender_id: session.user.id,
+      content,
+      type: 'text',
       reply_to: replyTo?.id || null,
-    })
-    setBusy(false)
-    if (error) notify(error.message)
-    else { setDraft(''); setReplyTo(null); setShowEmoji(false); loadWorkspace() }
+      created_at: createdAt,
+      profiles: profile,
+      message_reactions: [],
+      message_receipts: [],
+    }
+    if (activeIdRef.current === conversationId) {
+      setMessages((current) => [...current, optimisticMessage])
+    }
+    setConversations((current) => current.map((conversation) => conversation.id === conversationId
+      ? { ...conversation, last_message: optimisticMessage, updated_at: createdAt }
+      : conversation).sort((a, b) => new Date(b.updated_at) - new Date(a.updated_at)))
+    setBusy(true)
+    try {
+      const { error } = await supabase.from('messages').insert({
+        id: messageId,
+        conversation_id: conversationId,
+        sender_id: session.user.id,
+        content,
+        type: 'text',
+        reply_to: replyTo?.id || null,
+        created_at: createdAt,
+      })
+      if (error) throw error
+      setDraft((current) => current === content ? '' : current)
+      setReplyTo(null)
+      setShowEmoji(false)
+    } catch (error) {
+      setMessages((current) => current.filter((message) => message.id !== messageId))
+      setConversations((current) => current.map((conversation) => {
+        if (conversation.id !== conversationId || conversation.last_message?.id !== messageId) return conversation
+        return {
+          ...conversation,
+          last_message: previousConversation?.last_message || null,
+          updated_at: previousConversation?.updated_at || conversation.updated_at,
+        }
+      }))
+      notify(error.message || 'Message could not be sent. Please try again.')
+    } finally {
+      setBusy(false)
+    }
   }
 
   async function uploadFile(file) {
@@ -728,7 +867,7 @@ function App() {
     })
     setBusy(false)
     if (error) notify(error.message)
-    else { setShowAttach(false); loadWorkspace() }
+    else setShowAttach(false)
   }
 
   async function toggleVoiceRecording() {
