@@ -8,11 +8,15 @@ A responsive real-time messaging application built with React, Vite, Supabase Au
 - Unique usernames and generated Chatter IDs; exact username/ID discovery subject to account privacy.
 - Profile editing, profile photos, privacy controls, and light/dark appearance.
 - Friend requests, incoming-request actions, contacts, and direct conversations.
+- Pinned and recent conversation sections; pinned chats are saved per user in the current browser.
 - Realtime text messages, typing indicators, replies, message editing/deletion, reactions, forwarding, pinning, copy, read receipts, and unread counters, with older history loaded in pages.
 - Password reset links let users securely set and confirm a new password.
 - Group creation with selected friends, group details, and member lists.
 - Private chat-file uploads and public profile photos, with size/type restrictions and Storage policies.
-- Realtime activity notifications for messages and incoming friend requests.
+- Realtime activity notifications update the activity list and badge without interrupting the chat; optional browser notifications are silent.
+- Optional short notification chime can be enabled or muted in Settings; notification IDs are deduplicated.
+- Chat history shows an unread divider and message loading skeletons; connection status reflects the Realtime channel state.
+- Messages appear optimistically while sending. Realtime refreshes only changed messages, with a five-second active-chat sync as a fallback if a Realtime event is missed.
 - Responsive desktop and mobile layouts.
 
 ## Requirements
@@ -32,7 +36,7 @@ A responsive real-time messaging application built with React, Vite, Supabase Au
 
    If email/password login works but Chatter shows a database setup screen or a `PGRST205` error, the Auth service is connected but the app tables have not been installed. Run this SQL step against the same Supabase project configured in `.env`, then use **Retry database connection** in the app.
 
-   If the existing database is already installed, do not rerun the full schema. Apply [`supabase/migrations/20261119000000_chat_performance_and_message_pins.sql`](./supabase/migrations/20261119000000_chat_performance_and_message_pins.sql) in SQL Editor before deploying this version. It adds a membership-checked pin RPC and a private conversation-summary RPC, without replacing existing data.
+   If the existing database is already installed, do not rerun the full schema. Apply [`supabase/migrations/20261119000000_chat_performance_and_message_pins.sql`](./supabase/migrations/20261119000000_chat_performance_and_message_pins.sql) in SQL Editor before deploying this version. It adds a membership-checked pin RPC, a private conversation-summary RPC, and ensures message/reaction/receipt tables are in the Realtime publication, without replacing existing data.
 
 3. Install the Supabase CLI, authenticate, link your project, and deploy the Edge Functions:
 
@@ -79,6 +83,6 @@ The project SQL installs the database tables, indexes, profile/signup triggers, 
 
 - Supabase must be configured before the app can authenticate or access data. The source does not include credentials or a hosted backend.
 - Email verification and reset delivery depend on the Supabase Auth provider and SMTP configuration.
-- Browser notifications work while the app is open and permission is granted; background Web Push notifications and message sounds are not included. Group photos and a separate accept/decline flow for group invitations are not exposed in this initial UI.
+- Browser notifications work while the app is open and permission is granted; background Web Push notifications are not included. Group photos and a separate accept/decline flow for group invitations are not exposed in this initial UI.
 - Private attachment downloads use short-lived signed URLs and Storage RLS; chat files are not publicly readable.
 - Add rate limits and production email controls in Supabase Auth, configure backups, and validate deployment redirect URLs before launch.

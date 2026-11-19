@@ -502,6 +502,9 @@ function App() {
     setMessagesLoading(true)
     const pendingRefreshes = new Set()
     let refreshTimer
+    let syncTimer
+    let syncInProgress = false
+    let syncErrorReported = false
     async function refreshRealtimeMessage(messageId) {
       if (!messageId || !alive) return
       const { data, error } = await supabase.from('messages')
@@ -578,9 +581,65 @@ function App() {
         if (receiptError) notify(receiptError.message)
       }
     }
+    async function syncMissedMessages() {
+      if (!alive || syncInProgress) return
+      syncInProgress = true
+      try {
+        const latest = messagesRef.current.filter((message) => message.conversation_id === activeId).at(-1)
+        let request = supabase.from('messages')
+          .select('*, profiles:sender_id(id, username, full_name, avatar_url), message_reactions(id, user_id, emoji), message_receipts(user_id, read_at)')
+          .eq('conversation_id', activeId).is('deleted_at', null)
+        if (latest) {
+          request = request.or(`created_at.gt.${latest.created_at},and(created_at.eq.${latest.created_at},id.gt.${latest.id})`)
+        }
+        const { data, error } = await request
+          .order('created_at', { ascending: Boolean(latest) })
+          .order('id', { ascending: Boolean(latest) })
+          .limit(MESSAGE_PAGE_SIZE)
+        if (error) {
+          if (!syncErrorReported) notify(`Could not sync new messages: ${error.message}`)
+          syncErrorReported = true
+          return
+        }
+        syncErrorReported = false
+        if (!alive || !data?.length) return
+        const newRows = latest ? data : data.slice().reverse()
+        const hydrated = await addSignedAttachmentUrls(newRows, notify)
+        if (!alive) return
+        setMessages((current) => {
+          const byId = new Map(current.map((message) => [message.id, message]))
+          hydrated.forEach((message) => byId.set(message.id, message))
+          return [...byId.values()].sort((a, b) => new Date(a.created_at) - new Date(b.created_at) || a.id.localeCompare(b.id))
+        })
+        const lastMessage = hydrated.at(-1)
+        if (lastMessage) {
+          setConversations((current) => current.map((conversation) => conversation.id === activeId
+            ? { ...conversation, last_message: lastMessage, updated_at: lastMessage.created_at, unread: 0 }
+            : conversation))
+        }
+        const unreadIds = newRows.filter((message) => message.sender_id !== session.user.id &&
+          !message.message_receipts?.some((receipt) => receipt.user_id === session.user.id && receipt.read_at))
+          .map((message) => message.id)
+        if (unreadIds.length) {
+          const readAt = new Date().toISOString()
+          const { error: memberError } = await supabase.from('conversation_members')
+            .update({ last_read_at: readAt }).eq('conversation_id', activeId).eq('user_id', session.user.id)
+          if (memberError) notify(memberError.message)
+          const { error: receiptError } = await supabase.from('message_receipts').update({ read_at: readAt })
+            .eq('user_id', session.user.id).is('read_at', null).in('message_id', unreadIds)
+          if (receiptError) notify(receiptError.message)
+        }
+      } catch (error) {
+        if (!syncErrorReported) notify(`Could not sync new messages: ${error.message}`)
+        syncErrorReported = true
+      } finally {
+        syncInProgress = false
+      }
+    }
     setMessages([])
     setHasOlderMessages(false)
     loadMessages()
+    syncTimer = window.setInterval(syncMissedMessages, 5000)
     const channel = supabase.channel(`messages-${activeId}`)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'messages', filter: `conversation_id=eq.${activeId}` }, (payload) => {
         refreshRealtimeMessage(payload.new?.id || payload.old?.id)
@@ -591,13 +650,17 @@ function App() {
       .on('postgres_changes', { event: '*', schema: 'public', table: 'message_receipts' }, (payload) => {
         queueMessageRefresh(payload.new?.message_id || payload.old?.message_id)
       })
-      .subscribe()
+      .subscribe((status) => {
+        if (status === 'SUBSCRIBED') setConnectionStatus('connected')
+        else if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT' || status === 'CLOSED') setConnectionStatus('disconnected')
+        else setConnectionStatus('connecting')
+      })
     typingChannel.current = supabase.channel(`typing-${activeId}`)
       .on('broadcast', { event: 'typing' }, ({ payload }) => {
         setTypingUsers((current) => ({ ...current, [payload.userId]: payload.isTyping }))
         window.setTimeout(() => setTypingUsers((current) => ({ ...current, [payload.userId]: false })), 2500)
       }).subscribe()
-    return () => { alive = false; window.clearTimeout(refreshTimer); supabase.removeChannel(channel); if (typingChannel.current) supabase.removeChannel(typingChannel.current) }
+    return () => { alive = false; window.clearTimeout(refreshTimer); window.clearInterval(syncTimer); supabase.removeChannel(channel); if (typingChannel.current) supabase.removeChannel(typingChannel.current) }
   }, [activeId, session, notify])
 
   useEffect(() => {
