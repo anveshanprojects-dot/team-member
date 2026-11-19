@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   ArrowDown, ArrowLeft, ArrowUpRight, Bell, Check, CheckCheck, ChevronDown,
-  CircleHelp, File, FileText, Image, Info, LogOut, Menu, MessageCircle, MoreHorizontal,
+  CircleHelp, Copy, File, FileText, Image, Info, LogOut, Menu, MessageCircle, MoreHorizontal, Pin,
   Mic, Paperclip, Plus, Search, Send, Settings, Smile, Users, X,
 } from 'lucide-react'
 import { createClient } from '@supabase/supabase-js'
@@ -10,6 +10,19 @@ const supabaseUrl = import.meta.env.VITE_SUPABASE_URL
 const supabaseKey = import.meta.env.VITE_SUPABASE_ANON_KEY
 const supabase = supabaseUrl && supabaseKey ? createClient(supabaseUrl, supabaseKey) : null
 const EMOJIS = ['😀', '😂', '🥰', '😍', '😊', '😎', '🥳', '😭', '👍', '❤️', '🔥', '🎉', '🙏', '✨', '👋', '🤔']
+const MESSAGE_PAGE_SIZE = 50
+
+async function addSignedAttachmentUrls(rows, onError) {
+  return Promise.all(rows.map(async (message) => {
+    if (!message.attachment_url) return message
+    const { data, error } = await supabase.storage.from('chat-files').createSignedUrl(message.attachment_url, 3600)
+    if (error) {
+      onError(`Could not load attachment: ${error.message}`)
+      return message
+    }
+    return { ...message, attachment_path: message.attachment_url, attachment_url: data.signedUrl }
+  }))
+}
 
 function initials(name = '?') {
   return name.trim().split(/\s+/).slice(0, 2).map((part) => part[0]).join('').toUpperCase()
@@ -47,7 +60,7 @@ function AuthScreen({ onAuthenticated }) {
     try {
       if (mode === 'forgot') {
         const { error: requestError } = await supabase.auth.resetPasswordForEmail(form.email, {
-          redirectTo: `${window.location.origin}/`,
+          redirectTo: new URL(import.meta.env.BASE_URL, window.location.origin).toString(),
         })
         if (requestError) throw requestError
         setMessage('Password reset instructions are on their way to your email.')
@@ -58,7 +71,7 @@ function AuthScreen({ onAuthenticated }) {
           options: { data: {
             full_name: form.fullName.trim(),
             username: form.username.trim().replace(/^@/, '').toLowerCase(),
-          } },
+          }, emailRedirectTo: new URL(import.meta.env.BASE_URL, window.location.origin).toString() },
         })
         if (signUpError) throw signUpError
         if (data.session) {
@@ -127,14 +140,53 @@ function AuthScreen({ onAuthenticated }) {
   )
 }
 
+function PasswordRecoveryScreen({ onComplete }) {
+  const [password, setPassword] = useState('')
+  const [confirmation, setConfirmation] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState('')
+  const [complete, setComplete] = useState(false)
+
+  async function submit(event) {
+    event.preventDefault()
+    setError('')
+    if (password !== confirmation) {
+      setError('The passwords do not match.')
+      return
+    }
+    setBusy(true)
+    const { error: updateError } = await supabase.auth.updateUser({ password })
+    setBusy(false)
+    if (updateError) setError(updateError.message)
+    else setComplete(true)
+  }
+
+  return <main className="auth-page"><section className="auth-panel"><div className="auth-card">
+    <span className="eyebrow">ACCOUNT RECOVERY</span>
+    <h2>{complete ? 'Password updated' : 'Choose a new password'}</h2>
+    <p className="muted">{complete ? 'Your account is secure with the new password.' : 'Enter a new password for your account.'}</p>
+    {error && <div className="alert alert-error" role="alert">{error}</div>}
+    {complete
+      ? <button className="primary-button auth-submit" onClick={onComplete}>Continue to Chatter <ArrowUpRight size={17} /></button>
+      : <form onSubmit={submit} className="auth-form">
+        <label>New password<input required type="password" autoComplete="new-password" minLength="8" value={password} onChange={(event) => setPassword(event.target.value)} /></label>
+        <label>Confirm new password<input required type="password" autoComplete="new-password" minLength="8" value={confirmation} onChange={(event) => setConfirmation(event.target.value)} /></label>
+        <button className="primary-button auth-submit" disabled={busy}>{busy ? <span className="spinner" /> : 'Update password'} {!busy && <ArrowUpRight size={17} />}</button>
+      </form>}
+  </div></section></main>
+}
+
 function App() {
   const [session, setSession] = useState(null)
   const [initializing, setInitializing] = useState(true)
+  const [passwordRecovery, setPasswordRecovery] = useState(false)
   const [databaseSetupRequired, setDatabaseSetupRequired] = useState(false)
   const [profile, setProfile] = useState(null)
   const [conversations, setConversations] = useState([])
   const [activeId, setActiveId] = useState(null)
   const [messages, setMessages] = useState([])
+  const [hasOlderMessages, setHasOlderMessages] = useState(false)
+  const [loadingOlderMessages, setLoadingOlderMessages] = useState(false)
   const [activeStatus, setActiveStatus] = useState(null)
   const [friends, setFriends] = useState([])
   const [blockedUsers, setBlockedUsers] = useState([])
@@ -161,6 +213,7 @@ function App() {
   const [theme, setTheme] = useState(localStorage.getItem('chatter-theme') || 'light')
   const [typingUsers, setTypingUsers] = useState({})
   const bottomRef = useRef(null)
+  const chatCanvasRef = useRef(null)
   const fileRef = useRef(null)
   const typingChannel = useRef(null)
   const recorderRef = useRef(null)
@@ -172,6 +225,7 @@ function App() {
 
   const activeConversation = conversations.find((conversation) => conversation.id === activeId)
   const activeMember = activeConversation?.members?.find((member) => member.id !== session?.user?.id)
+  const latestMessageId = messages.at(-1)?.id
   const activeTitle = activeConversation?.is_group ? activeConversation.name : activeMember?.full_name || activeMember?.username || 'Conversation'
   const filteredConversations = useMemo(() => conversations.filter((conversation) => {
     const person = conversation.members?.find((member) => member.id !== session?.user?.id)
@@ -192,7 +246,8 @@ function App() {
       setSession(data.session)
       setInitializing(false)
     })
-    const { data } = supabase.auth.onAuthStateChange((_event, nextSession) => {
+    const { data } = supabase.auth.onAuthStateChange((event, nextSession) => {
+      if (event === 'PASSWORD_RECOVERY') setPasswordRecovery(true)
       setSession(nextSession)
       setInitializing(false)
     })
@@ -220,10 +275,11 @@ function App() {
       else setProfile(created)
     } else setProfile(ownProfile)
 
-    const [{ data: memberRows, error: convError }, { data: friendRows, error: friendError },
+    const [{ data: memberRows, error: convError }, { data: summaryRows, error: summaryError }, { data: friendRows, error: friendError },
       { data: requestRows, error: requestError }, { data: notificationRows, error: notificationError },
       { data: blockedRows, error: blockedError }] = await Promise.all([
-      supabase.from('conversation_members').select('conversation_id, last_read_at, conversations(id, name, description, is_group, created_by, updated_at, conversation_members(user_id, role, profiles(id, username, full_name, avatar_url, bio, show_online_status)), messages(id, content, created_at, sender_id, type))').eq('user_id', user.id),
+      supabase.from('conversation_members').select('conversation_id, conversations(id, name, description, is_group, created_by, updated_at, conversation_members(user_id, role, profiles(id, username, full_name, avatar_url, bio, show_online_status)))').eq('user_id', user.id),
+      supabase.rpc('get_conversation_summaries'),
       supabase.from('friendships').select('user_id, friend_id, profiles!friendships_friend_id_fkey(id, username, full_name, avatar_url, bio, show_online_status)').eq('user_id', user.id),
       supabase.from('friend_requests').select('id, sender_id, created_at, profiles!friend_requests_sender_id_fkey(id, username, full_name, avatar_url)').eq('receiver_id', user.id).eq('status', 'pending'),
       supabase.from('notifications').select('*').eq('user_id', user.id).order('created_at', { ascending: false }).limit(25),
@@ -233,7 +289,8 @@ function App() {
       setDatabaseSetupRequired(true)
       return
     }
-    for (const loadError of [convError, friendError, requestError, notificationError, blockedError]) if (loadError) notify(loadError.message)
+    for (const loadError of [convError, summaryError, friendError, requestError, notificationError, blockedError]) if (loadError) notify(loadError.message)
+    const summariesById = new Map((summaryRows || []).map((summary) => [summary.conversation_id, summary]))
     const seen = new Set()
     const normalized = (memberRows || []).flatMap((row) => {
       const conversation = row.conversations
@@ -243,8 +300,14 @@ function App() {
         ...member.profiles, role: member.role,
         is_online: member.profiles.show_online_status && onlineUserIds.current.has(member.profiles.id),
       } : null).filter(Boolean)
-      const orderedMessages = (conversation.messages || []).sort((a, b) => new Date(a.created_at) - new Date(b.created_at))
-      return [{ ...conversation, members, last_message: orderedMessages.at(-1), unread: orderedMessages.filter((message) => message.sender_id !== user.id && (!row.last_read_at || new Date(message.created_at) > new Date(row.last_read_at))).length }]
+      const summary = summariesById.get(conversation.id)
+      const lastMessage = summary?.last_message_id ? {
+        id: summary.last_message_id,
+        content: summary.last_message_content,
+        created_at: summary.last_message_created_at,
+        sender_id: summary.last_message_sender_id,
+      } : null
+      return [{ ...conversation, members, last_message: lastMessage, unread: Number(summary?.unread_count || 0) }]
     }).sort((a, b) => new Date(b.updated_at) - new Date(a.updated_at))
     setConversations(normalized)
     setFriends((friendRows || []).map((row) => row.profiles && ({
@@ -314,24 +377,29 @@ function App() {
   }, [tab, session, notifications, notify])
 
   useEffect(() => {
-    if (!activeId || !session?.user) { setMessages([]); return }
+    if (!activeId || !session?.user) { setMessages([]); setHasOlderMessages(false); return }
     let alive = true
     async function loadMessages() {
-      const { data, error } = await supabase.from('messages').select('*, profiles:sender_id(id, username, full_name, avatar_url), message_reactions(id, user_id, emoji), message_receipts(user_id, read_at)').eq('conversation_id', activeId).is('deleted_at', null).order('created_at', { ascending: true })
+      const { data, error } = await supabase.from('messages')
+        .select('*, profiles:sender_id(id, username, full_name, avatar_url), message_reactions(id, user_id, emoji), message_receipts(user_id, read_at)')
+        .eq('conversation_id', activeId).is('deleted_at', null)
+        .order('created_at', { ascending: false }).order('id', { ascending: false }).limit(MESSAGE_PAGE_SIZE)
       if (error) { notify(error.message); return }
-      const withSignedUrls = await Promise.all((data || []).map(async (message) => {
-        if (!message.attachment_url) return message
-        const { data: signed, error: signedError } = await supabase.storage.from('chat-files').createSignedUrl(message.attachment_url, 3600)
-        if (signedError) {
-          notify(`Could not load attachment: ${signedError.message}`)
-          return message
-        }
-        return { ...message, attachment_path: message.attachment_url, attachment_url: signed.signedUrl }
-      }))
-      if (alive) setMessages(withSignedUrls)
+      const page = await addSignedAttachmentUrls(data || [], notify)
+      if (alive) {
+        setHasOlderMessages(page.length === MESSAGE_PAGE_SIZE)
+        setMessages((current) => {
+          if (!current.length) return page.reverse()
+          const byId = new Map(current.map((message) => [message.id, message]))
+          page.forEach((message) => byId.set(message.id, message))
+          return [...byId.values()].sort((a, b) => new Date(a.created_at) - new Date(b.created_at) || a.id.localeCompare(b.id))
+        })
+      }
+      if (!alive) return
       const { error: readError } = await supabase.from('conversation_members').update({ last_read_at: new Date().toISOString() }).eq('conversation_id', activeId).eq('user_id', session.user.id)
       if (readError) notify(readError.message)
-      const unreadIds = (data || []).filter((message) => message.sender_id !== session.user.id &&
+      else setConversations((current) => current.map((conversation) => conversation.id === activeId ? { ...conversation, unread: 0 } : conversation))
+      const unreadIds = page.filter((message) => message.sender_id !== session.user.id &&
         !message.message_receipts?.some((receipt) => receipt.user_id === session.user.id && receipt.read_at)).map((message) => message.id)
       if (unreadIds.length) {
         const { error: receiptError } = await supabase.from('message_receipts').update({ read_at: new Date().toISOString() })
@@ -339,6 +407,8 @@ function App() {
         if (receiptError) notify(receiptError.message)
       }
     }
+    setMessages([])
+    setHasOlderMessages(false)
     loadMessages()
     const channel = supabase.channel(`messages-${activeId}`)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'messages', filter: `conversation_id=eq.${activeId}` }, loadMessages)
@@ -363,7 +433,7 @@ function App() {
     return () => { active = false }
   }, [activeMember?.id, activeConversation?.is_group, notify])
 
-  useEffect(() => { bottomRef.current?.scrollIntoView({ behavior: 'smooth' }) }, [messages, activeId])
+  useEffect(() => { bottomRef.current?.scrollIntoView({ behavior: 'smooth' }) }, [latestMessageId, activeId])
   useEffect(() => {
     document.documentElement.dataset.theme = theme
     localStorage.setItem('chatter-theme', theme)
@@ -392,6 +462,99 @@ function App() {
     setSearching(false)
     if (error) notify(error.message)
     else setSearchResults((data || []).filter((person) => person.id !== session.user.id))
+  }
+
+  async function loadOlderMessages() {
+    const oldestMessage = messages[0]
+    if (!activeId || !oldestMessage || !hasOlderMessages || loadingOlderMessages) return
+    const canvas = chatCanvasRef.current
+    const previousHeight = canvas?.scrollHeight || 0
+    const previousTop = canvas?.scrollTop || 0
+    const conversationId = activeId
+    setLoadingOlderMessages(true)
+    try {
+      const { data, error } = await supabase.from('messages')
+        .select('*, profiles:sender_id(id, username, full_name, avatar_url), message_reactions(id, user_id, emoji), message_receipts(user_id, read_at)')
+        .eq('conversation_id', conversationId).is('deleted_at', null)
+        .or(`created_at.lt.${oldestMessage.created_at},and(created_at.eq.${oldestMessage.created_at},id.lt.${oldestMessage.id})`)
+        .order('created_at', { ascending: false }).order('id', { ascending: false }).limit(MESSAGE_PAGE_SIZE)
+      if (error) { notify(error.message); return }
+      if (conversationId !== activeId) return
+      const olderPage = await addSignedAttachmentUrls(data || [], notify)
+      setMessages((current) => {
+        const byId = new Map(current.map((message) => [message.id, message]))
+        olderPage.forEach((message) => byId.set(message.id, message))
+        return [...byId.values()].sort((a, b) => new Date(a.created_at) - new Date(b.created_at) || a.id.localeCompare(b.id))
+      })
+      setHasOlderMessages(olderPage.length === MESSAGE_PAGE_SIZE)
+      requestAnimationFrame(() => {
+        if (chatCanvasRef.current === canvas && canvas) {
+          canvas.scrollTop = previousTop + canvas.scrollHeight - previousHeight
+        }
+      })
+    } catch (error) {
+      notify(`Could not load older messages: ${error.message}`)
+    } finally {
+      setLoadingOlderMessages(false)
+    }
+  }
+
+  async function copyMessage(message) {
+    if (!navigator.clipboard?.writeText) {
+      notify('Copying is not available in this browser.')
+      return
+    }
+    try {
+      await navigator.clipboard.writeText(message.content)
+      notify('Message copied.')
+    } catch (error) {
+      notify(`Could not copy message: ${error.message}`)
+    }
+  }
+
+  async function toggleMessagePin(message) {
+    const { data: pinned, error } = await supabase.rpc('toggle_message_pin', { target_message: message.id })
+    if (error) {
+      notify(error.code === 'PGRST202'
+        ? 'Apply the chat performance and message-pins SQL migration before using pins.'
+        : error.message)
+      return
+    }
+    setMessages((current) => current.map((item) => item.id === message.id
+      ? { ...item, is_pinned: pinned, pinned_by: pinned ? session.user.id : null, pinned_at: pinned ? new Date().toISOString() : null }
+      : item))
+    notify(pinned ? 'Message pinned for everyone in this conversation.' : 'Message unpinned.')
+  }
+
+  async function searchConversation() {
+    const term = window.prompt('Search in this conversation')
+    if (!term?.trim() || !activeId) return
+    const conversationId = activeId
+    const safeTerm = term.trim().replace(/[\\%_]/g, '\\$&')
+    const columns = '*, profiles:sender_id(id, username, full_name, avatar_url), message_reactions(id, user_id, emoji), message_receipts(user_id, read_at)'
+    const { data: matches, error } = await supabase.from('messages')
+      .select(columns).eq('conversation_id', conversationId).is('deleted_at', null)
+      .ilike('content', `%${safeTerm}%`)
+      .order('created_at', { ascending: false }).order('id', { ascending: false }).limit(1)
+    if (error) { notify(error.message); return }
+    const match = matches?.[0]
+    if (!match) { notify('No matching messages were found.'); return }
+    const date = match.created_at
+    const beforeQuery = supabase.from('messages').select(columns)
+      .eq('conversation_id', conversationId).is('deleted_at', null)
+      .or(`created_at.lt.${date},and(created_at.eq.${date},id.lt.${match.id})`)
+      .order('created_at', { ascending: false }).order('id', { ascending: false }).limit(25)
+    const afterQuery = supabase.from('messages').select(columns)
+      .eq('conversation_id', conversationId).is('deleted_at', null)
+      .or(`created_at.gt.${date},and(created_at.eq.${date},id.gt.${match.id})`)
+      .order('created_at', { ascending: true }).order('id', { ascending: true }).limit(25)
+    const [{ data: before, error: beforeError }, { data: after, error: afterError }] = await Promise.all([beforeQuery, afterQuery])
+    if (beforeError || afterError) { notify(beforeError?.message || afterError.message); return }
+    if (activeId !== conversationId) return
+    const context = await addSignedAttachmentUrls([...(before || []).reverse(), match, ...(after || [])], notify)
+    setMessages(context)
+    setHasOlderMessages((before || []).length === 25)
+    requestAnimationFrame(() => document.getElementById(`message-${match.id}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' }))
   }
 
   async function openDirect(profileToOpen) {
@@ -606,17 +769,13 @@ function App() {
     const result = ownReaction
       ? await supabase.from('message_reactions').update({ emoji }).eq('id', ownReaction.id)
       : await supabase.from('message_reactions').insert({ message_id: message.id, user_id: session.user.id, emoji })
-    if (result.error) notify(result.error.message)
-    else {
-      const { data } = await supabase.from('messages').select('*, profiles:sender_id(id, username, full_name, avatar_url), message_reactions(id, user_id, emoji), message_receipts(user_id, read_at)').eq('conversation_id', activeId).is('deleted_at', null).order('created_at')
-      const withSignedUrls = await Promise.all((data || []).map(async (item) => {
-        if (!item.attachment_url) return item
-        const { data: signed, error } = await supabase.storage.from('chat-files').createSignedUrl(item.attachment_url, 3600)
-        if (error) { notify(`Could not load attachment: ${error.message}`); return item }
-        return { ...item, attachment_path: item.attachment_url, attachment_url: signed.signedUrl }
-      }))
-      setMessages(withSignedUrls)
-    }
+    if (result.error) { notify(result.error.message); return }
+    const { data, error } = await supabase.from('messages')
+      .select('*, profiles:sender_id(id, username, full_name, avatar_url), message_reactions(id, user_id, emoji), message_receipts(user_id, read_at)')
+      .eq('id', message.id).single()
+    if (error) { notify(error.message); return }
+    const [updatedMessage] = await addSignedAttachmentUrls([data], notify)
+    setMessages((current) => current.map((item) => item.id === message.id ? updatedMessage : item))
   }
 
   async function deleteMessage(message) {
@@ -672,6 +831,7 @@ function App() {
 
   if (!supabase) return <div className="setup-screen"><div className="setup-card"><div className="brand"><span className="brand-mark"><MessageCircle size={23} /></span> chatter</div><h1>Almost there.</h1><p>Add your Supabase project URL and anon key to a <code>.env</code> file to connect Chatter to its live backend.</p><pre>VITE_SUPABASE_URL=https://…supabase.co{'\n'}VITE_SUPABASE_ANON_KEY=…</pre><p>Then run <code>npm run dev</code>. See <a href="./README.md">README.md</a> for database setup.</p></div></div>
   if (initializing) return <div className="loading-screen"><span className="spinner spinner-large" /><span>Getting things ready…</span></div>
+  if (passwordRecovery) return <PasswordRecoveryScreen onComplete={() => setPasswordRecovery(false)} />
   if (!session) return <AuthScreen onAuthenticated={setSession} />
   if (databaseSetupRequired) return <div className="setup-screen"><div className="setup-card">
     <div className="brand"><span className="brand-mark"><MessageCircle size={23} /></span> chatter</div>
@@ -704,11 +864,10 @@ function App() {
             <button className="icon-button" aria-label="Settings" onClick={() => setShowSettings(true)}><Settings size={18} /></button>
           </div>
         </header>
-        <button className="workspace-switcher" onClick={() => notify('You’re viewing your personal workspace.')}>
+        <div className="workspace-switcher">
           <span className="workspace-mark">W</span>
           <span><strong>My workspace</strong><small>Team messaging</small></span>
-          <ChevronDown size={15} />
-        </button>
+        </div>
         <button className="my-profile" onClick={() => setShowProfile(true)}>
           <Avatar profile={profile} online size="large" /><span className="my-profile-copy"><strong>{profile?.full_name || 'Your profile'}</strong><small>@{profile?.username || 'username'}</small></span><ChevronDown size={16} className="profile-chevron" />
         </button>
@@ -748,10 +907,11 @@ function App() {
             <button className="icon-button back-button" onClick={() => setActiveId(null)} aria-label="Back to conversations"><ArrowLeft size={19} /></button>
             {activeConversation.is_group ? <span className="group-avatar group-avatar-head"><Users size={18} /></span> : <Avatar profile={activeMember} online={activeMember?.is_online} />}
             <button className="chat-person" onClick={() => setShowInfo(!showInfo)}><strong>{activeTitle}</strong><small>{activeConversation.is_group ? `${activeConversation.members?.length || 0} members` : activeMember?.is_online ? 'Online now' : activeStatus?.last_seen_at ? `Last seen ${formatTime(activeStatus.last_seen_at)}` : 'Offline'}</small></button>
-            <div className="chat-header-actions"><button className="icon-button" title="Search messages" onClick={() => { const term = window.prompt('Search in this conversation'); if (term) { const result = messages.find((message) => message.content?.toLowerCase().includes(term.toLowerCase())); if (result) document.getElementById(`message-${result.id}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' }); else notify('No matching messages in the loaded conversation.') } }}><Search size={18} /></button><button className="icon-button" onClick={() => setShowInfo(!showInfo)} title="Conversation details"><MoreHorizontal size={19} /></button></div>
+            <div className="chat-header-actions"><button className="icon-button" title="Search all messages in this conversation" aria-label="Search messages" onClick={searchConversation}><Search size={18} /></button><button className="icon-button" onClick={() => setShowInfo(!showInfo)} title="Conversation details"><MoreHorizontal size={19} /></button></div>
           </header>
-          <div className="chat-canvas">
-            <div className="conversation-date"><span>TODAY</span></div>
+          <div className="chat-canvas" ref={chatCanvasRef}>
+            {hasOlderMessages && <button className="load-older-button" type="button" onClick={loadOlderMessages} disabled={loadingOlderMessages}>{loadingOlderMessages ? 'Loading…' : 'Load older messages'}</button>}
+            <div className="conversation-date"><span>CONVERSATION</span></div>
             {messages.length === 0 && <div className="chat-empty"><span className="chat-empty-icon">{activeConversation.is_group ? <Users size={24} /> : <MessageCircle size={24} />}</span><strong>This is the start of something good.</strong><span>Say hello to {activeTitle}.</span></div>}
             {messages.map((message, index) => {
               const own = message.sender_id === session.user.id
@@ -768,6 +928,7 @@ function App() {
                     const original = messages.find((item) => item.id === message.reply_to)
                     return original ? `Replying to ${original.profiles?.full_name || 'a message'}: ${original.content}` : 'Replying to an earlier message'
                   })()}</div>}
+                  {message.is_pinned && <div className="message-pin-badge"><Pin size={12} /> Pinned for everyone</div>}
                   {message.type === 'image' && <a href={message.attachment_url} target="_blank" rel="noreferrer"><img className="message-image" src={message.attachment_url} alt={message.content} /></a>}
                   {message.type === 'video' && <video className="message-video" src={message.attachment_url} controls />}
                   {message.type === 'audio' && <audio src={message.attachment_url} controls />}
@@ -775,7 +936,14 @@ function App() {
                   {message.type === 'text' && <div className="message-bubble"><span>{message.content}</span>{message.edited_at && <small className="edited-label">edited</small>}</div>}
                   <div className="message-meta"><time>{formatTime(message.created_at)}</time>{own && (seen ? <CheckCheck size={14} className="seen-check" /> : delivered ? <CheckCheck size={14} /> : <Check size={14} />)}</div>
                   {message.message_reactions?.length > 0 && <div className="reaction-list">{message.message_reactions.map((reaction) => <button key={reaction.id} onClick={() => reactTo(message, reaction.emoji)}>{reaction.emoji}</button>)}</div>}
-                  <div className="message-hover-actions"><button title="Reply" onClick={() => setReplyTo(message)}><MessageCircle size={14} /></button><button title="React" onClick={() => reactTo(message, '❤️')}><Smile size={14} /></button><button title="Forward" onClick={() => forwardMessage(message)}><ArrowUpRight size={14} /></button>{own && <><button title="Edit" onClick={() => editMessage(message)}><MoreHorizontal size={14} /></button><button title="Delete for everyone" onClick={() => deleteMessage(message)}><X size={14} /></button></>}</div>
+                  <div className="message-hover-actions">
+                    <button title="Reply" aria-label="Reply" onClick={() => setReplyTo(message)}><MessageCircle size={14} /></button>
+                    <button title="React" aria-label="React" onClick={() => reactTo(message, '❤️')}><Smile size={14} /></button>
+                    <button title="Copy message" aria-label="Copy message" onClick={() => copyMessage(message)} disabled={!message.content}><Copy size={14} /></button>
+                    <button title={message.is_pinned ? 'Unpin message' : 'Pin message'} aria-label={message.is_pinned ? 'Unpin message' : 'Pin message'} onClick={() => toggleMessagePin(message)}><Pin size={14} /></button>
+                    <button title="Forward" aria-label="Forward" onClick={() => forwardMessage(message)}><ArrowUpRight size={14} /></button>
+                    {own && <><button title="Edit" aria-label="Edit" onClick={() => editMessage(message)}><MoreHorizontal size={14} /></button><button title="Delete for everyone" aria-label="Delete for everyone" onClick={() => deleteMessage(message)}><X size={14} /></button></>}
+                  </div>
                 </div>
               </div>
             })}
