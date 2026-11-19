@@ -34,12 +34,8 @@ button:focus-visible, input:focus-visible, textarea:focus-visible { outline: 3px
 .icon-button { position: relative; display: inline-grid; place-items: center; width: 35px; height: 35px; padding: 0; color: #71807d; background: transparent; border: 0; border-radius: 10px; transition: background .16s, color .16s; }
 .icon-button:hover { color: var(--green); background: var(--soft); }
 .notification-dot, .nav-dot { position: absolute; width: 7px; height: 7px; top: 6px; right: 7px; border: 1.5px solid white; border-radius: 100%; background: #f27b65; }
-.my-profile { display: flex; align-items: center; gap: 11px; margin: 0 13px 15px; padding: 12px 10px; text-align: left; background: #f7faf8; border: 1px solid #f0f3f2; border-radius: 13px; }
-.my-profile:hover { background: #eff7f3; }
-.my-profile-copy, .contact-copy { display: grid; min-width: 0; gap: 3px; flex: 1; }
-.my-profile-copy strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; }
-.my-profile-copy small, .contact-copy small { color: var(--muted); font-size: 11px; }
-.profile-chevron { color: #9aa8a5; margin-left: auto; }
+.contact-copy { display: grid; min-width: 0; gap: 3px; flex: 1; }
+.contact-copy small { color: var(--muted); font-size: 11px; }
 .avatar { width: 38px; height: 38px; flex: 0 0 auto; position: relative; display: inline-grid; place-items: center; border-radius: 50%; color: #fff; background: linear-gradient(140deg, #5db99a, #3e8b81); font: 700 12px Manrope, sans-serif; }
 .avatar img { width: 100%; height: 100%; object-fit: cover; border-radius: inherit; }
 .avatar-large { width: 43px; height: 43px; font-size: 13px; }
@@ -265,7 +261,7 @@ button:focus-visible, input:focus-visible, textarea:focus-visible { outline: 3px
 html[data-theme=dark] { color-scheme: dark; --ink: #e6eeea; --muted: #9aaba4; --line: #283a34; --paper: #17231f; --canvas: #111b18; --soft: #253630; --bubble: #23332d; --sent: #144b3a; --shadow: 0 14px 45px #0005; }
 html[data-theme=dark] body { background: #111b18; }
 html[data-theme=dark] .sidebar, html[data-theme=dark] .chat-header, html[data-theme=dark] .composer, html[data-theme=dark] .info-panel { background: var(--paper); }
-html[data-theme=dark] .my-profile, html[data-theme=dark] .search-box, html[data-theme=dark] .composer-input { background: #202f29; border-color: #293a33; }
+html[data-theme=dark] .search-box, html[data-theme=dark] .composer-input { background: #202f29; border-color: #293a33; }
 html[data-theme=dark] .conversation-title, html[data-theme=dark] .contact-copy strong, html[data-theme=dark] .chat-person, html[data-theme=dark] .message-bubble, html[data-theme=dark] .auth-card h2 { color: #e1ece6; }
 html[data-theme=dark] .conversation-row:hover, html[data-theme=dark] .conversation-selected, html[data-theme=dark] .contact-row:hover { background: #20342c; }
 html[data-theme=dark] .contact-remove:hover { background: #4a2d2a; }
@@ -301,7 +297,7 @@ html[data-theme=dark] .mobile-bottom-nav { background: #17231f; border-color: #2
   .sidebar { position: absolute; inset: 0 0 65px; width: 100%; border-right: 0; transition: transform .24s; }
   .conversation-open .sidebar { transform: translateX(-100%); pointer-events: none; }
   .sidebar.mobile-menu-open { transform: translateX(0); pointer-events: auto; }
-  .sidebar-header { height: 58px; padding-inline: 17px; }.my-profile { margin-bottom: 11px; }
+  .sidebar-header { height: 58px; padding-inline: 17px; }
   .chat-area { position: absolute; inset: 0 0 65px; visibility: hidden; transform: translateX(8%); opacity: 0; transition: transform .2s, opacity .2s, visibility .2s; }
   .chat-area-active { visibility: visible; transform: translateX(0); opacity: 1; }
   .welcome-panel { display: none; }.app-shell:not(.conversation-open) .chat-area { visibility: visible; inset: 0 0 65px; transform: none; opacity: 1; pointer-events: none; }
@@ -349,7 +345,6 @@ html[data-theme=dark] .mobile-bottom-nav { background: #17231f; border-color: #2
 .workspace-switcher strong { font-size: 11px; font-weight: 700; }
 .workspace-switcher small { color: #87938e; font-size: 9px; }
 .workspace-switcher > svg { color: #87938e; }
-.my-profile { margin: 0 12px 10px; padding: 9px; border-radius: 9px; }
 .search-box { height: 36px; margin: 0 12px 10px; border-radius: 7px; }
 .search-box input { font-size: 11px; }
 .main-nav { grid-template-columns: 1fr; gap: 2px; padding: 0 10px 11px; }
@@ -552,7 +547,6 @@ html[data-theme=dark] .account-danger-zone { background: #302321; border-color: 
 @media (min-width: 701px) and (max-width: 780px) {
   .app-shell { grid-template-columns: 230px minmax(0, 1fr); }
   .workspace-switcher { margin-inline: 8px; }
-  .my-profile { margin-inline: 8px; }
   .main-nav { padding-inline: 7px; }
   .nav-item { gap: 7px; padding-inline: 7px; }
   .welcome-illustration { display: none; }
@@ -566,7 +560,6 @@ html[data-theme=dark] .account-danger-zone { background: #302321; border-color: 
   .sidebar { inset: 0 0 calc(60px + env(safe-area-inset-bottom)); width: 100%; }
   .sidebar-header { height: 55px; flex: 0 0 55px; padding-inline: 14px; }
   .workspace-switcher { margin-inline: 10px; }
-  .my-profile { margin-inline: 10px; }
   .search-box { margin-inline: 10px; }
   .main-nav { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .sidebar-list { overscroll-behavior: contain; }
@@ -645,7 +638,6 @@ html[data-theme=dark] .account-danger-zone { background: #302321; border-color: 
 @media (max-height: 500px) and (max-width: 700px) {
   .sidebar-header { height: 48px; flex-basis: 48px; }
   .workspace-switcher { min-height: 40px; margin-bottom: 5px; }
-  .my-profile { padding-block: 6px; margin-bottom: 6px; }
   .search-box { margin-bottom: 6px; }
   .list-heading { min-height: 34px; }
   .mobile-bottom-nav { height: calc(50px + env(safe-area-inset-bottom)); }
@@ -677,9 +669,7 @@ body { background: #f0f3f1; }
 .brand { letter-spacing: -.8px; }
 .brand-mark { box-shadow: 0 3px 8px rgba(22, 92, 73, .15); }
 .workspace-switcher { transition: background .16s, border-color .16s, box-shadow .16s; }
-.workspace-switcher:focus-visible, .my-profile:focus-visible { outline: 3px solid rgba(24, 118, 95, .18); outline-offset: 2px; }
-.my-profile { transition: background .16s, border-color .16s; }
-.my-profile:hover { border-color: #e2ebe5; }
+.workspace-switcher:focus-visible { outline: 3px solid rgba(24, 118, 95, .18); outline-offset: 2px; }
 .search-box, .people-search { transition: background .16s, border-color .16s, box-shadow .16s; }
 .search-box:focus-within, .people-search:focus-within { border-color: #a9d2bd; box-shadow: 0 0 0 3px rgba(24, 118, 95, .07); }
 .main-nav { border-bottom-color: #edf1ee; }
@@ -736,8 +726,25 @@ html[data-theme=dark] .settings-nav-selected, html[data-theme=dark] .settings-na
 @media (min-width: 701px) and (max-width: 1100px) {
   .app-shell { grid-template-columns: 300px minmax(0, 1fr); }
 }
-.my-profile-copy strong { font-size: 14px; }
-.my-profile-copy small, .contact-copy small { font-size: 12px; }
+.contact-copy small { font-size: 12px; }
+
+.settings-page-backdrop {
+  display: block;
+  overflow: hidden;
+  padding: env(safe-area-inset-top) 0 env(safe-area-inset-bottom);
+  background: var(--paper);
+  backdrop-filter: none;
+  animation: none;
+}
+.settings-page-backdrop .settings-window {
+  width: 100%;
+  max-width: none;
+  height: 100%;
+  max-height: none;
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+}
 .search-box input, .people-search input { font-size: 14px; }
 .main-nav { gap: 5px; }
 .nav-item { min-height: 40px; gap: 10px; font-size: 13px; }
@@ -818,7 +825,6 @@ html[data-theme=dark] .message-skeleton-own span { background: #174536; }
   .conversation-open .sidebar { bottom: 0; }
   .sidebar-header { height: 58px; flex-basis: 58px; padding-inline: 16px; }
   .workspace-switcher, .sidebar-footer, .main-nav { display: none; }
-  .my-profile { min-height: 58px; margin: 4px 12px 8px; padding: 8px; border-radius: 12px; }
   .search-box { height: 46px; margin: 0 12px 7px; border-radius: 12px; }
   .list-heading { min-height: 43px; padding-inline: 17px 14px; font-size: 11px; }
   .chat-list-section { padding-bottom: 5px; }

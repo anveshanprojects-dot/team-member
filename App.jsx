@@ -1,8 +1,8 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
-  ArrowDown, ArrowLeft, ArrowUpRight, Bell, Check, CheckCheck, ChevronDown,
+  ArrowDown, ArrowLeft, ArrowUpRight, Bell, Check, CheckCheck,
   CircleHelp, Compass, Copy, File, FileText, Image, Info, LogOut, Menu, MessageCircle, MoreHorizontal, Pin,
-  Mic, Paperclip, Plus, Search, Send, Settings, Smile, Users, X,
+  Mic, Paperclip, Plus, Search, Send, Settings, Smile, UserRound, Users, X,
 } from 'lucide-react'
 import { createClient } from '@supabase/supabase-js'
 
@@ -205,8 +205,7 @@ function App() {
   const [showEmoji, setShowEmoji] = useState(false)
   const [showAttach, setShowAttach] = useState(false)
   const [recording, setRecording] = useState(false)
-  const [showProfile, setShowProfile] = useState(false)
-  const [showSettings, setShowSettings] = useState(false)
+  const [showSettings, setShowSettings] = useState(() => window.location.hash.startsWith('#settings'))
   const [showGroup, setShowGroup] = useState(false)
   const [showMobileMenu, setShowMobileMenu] = useState(false)
   const [toast, setToast] = useState('')
@@ -254,6 +253,24 @@ function App() {
     setToast(text)
     window.setTimeout(() => setToast(''), 3500)
   }, [])
+
+  function openSettingsPage() {
+    const settingsUrl = new URL(import.meta.env.BASE_URL, window.location.origin)
+    settingsUrl.hash = 'settings'
+    const settingsTab = window.open(settingsUrl.toString(), '_blank')
+    if (!settingsTab) {
+      notify('Your browser blocked the Settings tab. Allow pop-ups for Chatter and try again.')
+      return
+    }
+    settingsTab.opener = null
+  }
+
+  function closeSettingsPage() {
+    const chatUrl = new URL(window.location.href)
+    chatUrl.hash = ''
+    window.history.replaceState(null, '', `${chatUrl.pathname}${chatUrl.search}`)
+    setShowSettings(false)
+  }
 
   const enableNotificationSound = useCallback(async () => {
     if (!window.AudioContext) {
@@ -1113,6 +1130,34 @@ function App() {
     notify('Your account has been deleted.')
   }
 
+  async function saveSettings(updates) {
+    const { data, error } = await supabase.from('profiles').update(updates).eq('id', session.user.id)
+      .select('id,user_id,username,full_name,bio,avatar_url,discoverable,show_online_status,show_last_seen,created_at').single()
+    if (error) { notify(error.message); return false }
+    setProfile(data)
+    await loadWorkspace()
+    return true
+  }
+
+  const settingsProps = {
+    profile,
+    email: session?.user?.email,
+    blockedUsers,
+    onUnblock: unblockUser,
+    onDeleteAccount: deleteAccount,
+    onClose: closeSettingsPage,
+    onSignOut: signOut,
+    onSave: saveSettings,
+    theme,
+    setTheme,
+    notify,
+    notificationsEnabled,
+    setNotificationsEnabled,
+    notificationSoundEnabled,
+    setNotificationSoundEnabled,
+    enableNotificationSound,
+  }
+
   if (!supabase) return <div className="setup-screen"><div className="setup-card"><div className="brand"><span className="brand-mark"><MessageCircle size={23} /></span> chatter</div><h1>Almost there.</h1><p>Add your Supabase project URL and anon key to a <code>.env</code> file to connect Chatter to its live backend.</p><pre>VITE_SUPABASE_URL=https://…supabase.co{'\n'}VITE_SUPABASE_ANON_KEY=…</pre><p>Then run <code>npm run dev</code>. See <a href="./README.md">README.md</a> for database setup.</p></div></div>
   if (initializing) return <div className="loading-screen"><span className="spinner spinner-large" /><span>Getting things ready…</span></div>
   if (passwordRecovery) return <PasswordRecoveryScreen onComplete={() => setPasswordRecovery(false)} />
@@ -1132,6 +1177,7 @@ function App() {
     </div>
     <p className="database-setup-note">Run the SQL with a Supabase project owner account. Never put a service-role key in the website.</p>
   </div></div>
+  if (showSettings) return <SettingsModal {...settingsProps} standalone />
 
   const startTyping = () => typingChannel.current?.send({ type: 'broadcast', event: 'typing', payload: { userId: session.user.id, isTyping: true } })
   const unreadTotal = conversations.reduce((sum, conversation) => sum + conversation.unread, 0)
@@ -1179,16 +1225,13 @@ function App() {
           <div className="header-actions">
             <button className="icon-button mobile-only" aria-label="Close menu" onClick={() => setShowMobileMenu(false)}><X size={19} /></button>
             <button className="icon-button" aria-label="Notifications" onClick={() => setTab(tab === 'notifications' ? 'chats' : 'notifications')}><Bell size={18} />{notifications.some((item) => !item.read_at) && <i className="notification-dot" />}</button>
-            <button className="icon-button" aria-label="Settings" onClick={() => setShowSettings(true)}><Settings size={18} /></button>
+            <button className="icon-button" aria-label="Settings" onClick={openSettingsPage}><Settings size={18} /></button>
           </div>
         </header>
         <div className="workspace-switcher">
           <span className="workspace-mark">W</span>
           <span><strong>My workspace</strong><small>Team messaging</small></span>
         </div>
-        <button className="my-profile" onClick={() => setShowProfile(true)}>
-          <Avatar profile={profile} online size="large" /><span className="my-profile-copy"><strong>{profile?.full_name || 'Your profile'}</strong><small>@{profile?.username || 'username'}</small></span><ChevronDown size={16} className="profile-chevron" />
-        </button>
         <form className="search-box" onSubmit={(event) => { setTab('search'); setUserSearch(query); searchUsers(event, query) }}>
           <Search size={17} /><input placeholder="Search messages or people" value={query} onChange={(event) => setQuery(event.target.value)} />
           {query && <button type="button" className="clear-search" onClick={() => setQuery('')}><X size={14} /></button>}
@@ -1313,16 +1356,6 @@ function App() {
         </div>}
       </section>
       {showInfo && activeConversation && <aside className="info-panel"><header><strong>Details</strong><button className="icon-button" onClick={() => setShowInfo(false)}><X size={18} /></button></header><div className="info-person">{activeConversation.is_group ? <span className="group-avatar group-avatar-xl"><Users size={25} /></span> : <Avatar profile={activeMember} size="xl" online={activeMember?.is_online} />}<strong>{activeTitle}</strong><span>{activeConversation.is_group ? `Group · ${activeConversation.members?.length || 0} members` : `@${activeMember?.username}`}</span>{!activeConversation.is_group && activeMember?.user_id && <><small>Chatter ID · {activeMember.user_id}</small><small>{activeMember.is_online ? 'Online now' : activeStatus?.last_seen_at ? `Last seen ${formatTime(activeStatus.last_seen_at)}` : 'Offline'}</small></>}</div>{activeConversation.is_group && <div className="info-members"><h4>MEMBERS</h4>{activeConversation.members?.map((member) => <div key={member.id}><Avatar profile={member} size="small" online={member.is_online} /><span>{member.full_name}<small>{member.id === session.user.id ? 'You' : `@${member.username}`} {member.role === 'admin' ? '· Admin' : ''}</small></span>{activeConversation.members.find((item) => item.id === session.user.id)?.role === 'admin' && member.id !== session.user.id && <><button className="text-button" onClick={() => promoteGroupMember(member.id)}>Make admin</button><button className="text-button" onClick={() => removeGroupMember(member.id)}>Remove</button></>}</div>)}{activeConversation.members.find((item) => item.id === session.user.id)?.role === 'admin' && friends.filter((friend) => !activeConversation.members.some((member) => member.id === friend.id)).length > 0 && <div className="info-add-members">{friends.filter((friend) => !activeConversation.members.some((member) => member.id === friend.id)).map((friend) => <button key={friend.id} className="text-button" onClick={() => addGroupMember(friend.id)}><Plus size={13} />Add {friend.full_name}</button>)}</div>}</div>}{activeConversation.is_group ? <div className="info-meta group-admin-actions"><p>{activeConversation.description || 'No group description yet.'}</p><button className="subtle-button" onClick={() => renameGroup(activeConversation)}>Rename group</button>{activeConversation.members.find((item) => item.id === session.user.id)?.role === 'admin' && <button className="subtle-button" onClick={() => editGroupDescription(activeConversation)}>Edit description</button>}<button className="subtle-button" onClick={() => removeGroupMember(session.user.id)}>Leave group</button>{activeConversation.created_by === session.user.id && <button className="subtle-button danger-action" onClick={() => deleteGroup(activeConversation)}>Delete group</button>}</div> : <div className="info-meta"><span><Info size={16} />About</span><p>{activeMember?.bio || 'Making room for good conversations.'}</p><button className="subtle-button danger-action" onClick={() => blockUser(activeMember.id)}>Block user</button></div>}</aside>}
-      {showProfile && <ProfileModal profile={profile} email={session.user.email} onClose={() => setShowProfile(false)} onSave={async (updates) => {
-        const { data, error } = await supabase.from('profiles').update(updates).eq('id', session.user.id).select('id,user_id,username,full_name,bio,avatar_url,discoverable,show_online_status,show_last_seen,created_at').single()
-        if (error) { notify(error.message); return false }
-        setProfile(data); await loadWorkspace(); return true
-      }} notify={notify} />}
-      {showSettings && <SettingsModal profile={profile} email={session.user.email} blockedUsers={blockedUsers} onUnblock={unblockUser} onDeleteAccount={deleteAccount} onClose={() => setShowSettings(false)} onSignOut={signOut} onSave={async (updates) => {
-        const { data, error } = await supabase.from('profiles').update(updates).eq('id', session.user.id).select('id,user_id,username,full_name,bio,avatar_url,discoverable,show_online_status,show_last_seen,created_at').single()
-        if (error) { notify(error.message); return false }
-        setProfile(data); await loadWorkspace(); return true
-      }} theme={theme} setTheme={setTheme} notify={notify} notificationsEnabled={notificationsEnabled} setNotificationsEnabled={setNotificationsEnabled} notificationSoundEnabled={notificationSoundEnabled} setNotificationSoundEnabled={setNotificationSoundEnabled} enableNotificationSound={enableNotificationSound} />}
       {showGroup && <GroupModal friends={friends} onClose={() => setShowGroup(false)} onCreate={createGroup} busy={busy} />}
       {toast && <div className="toast"><span className="toast-check"><Check size={14} /></span>{toast}</div>}
       <nav className="mobile-bottom-nav" aria-label="Mobile navigation">
@@ -1330,28 +1363,57 @@ function App() {
         <button onClick={() => { setTab('contacts'); setActiveId(null) }} className={tab === 'contacts' ? 'mobile-nav-selected' : ''}><Users size={19} /><span>People</span></button>
         <button onClick={() => { setTab('requests'); setActiveId(null) }} className={tab === 'requests' ? 'mobile-nav-selected' : ''}><ArrowDown size={19} /><span>Requests</span>{requests.length > 0 && <i className="mobile-nav-badge">{requests.length}</i>}</button>
         <button onClick={() => { setTab('search'); setActiveId(null) }} className={tab === 'search' ? 'mobile-nav-selected' : ''}><Compass size={19} /><span>Discover</span></button>
-        <button onClick={() => setShowSettings(true)}><Settings size={19} /><span>Settings</span></button>
+        <button onClick={openSettingsPage}><Settings size={19} /><span>Settings</span></button>
       </nav>
     </main>
   )
 }
 
-function ProfileModal({ profile, email, onClose, onSave, notify }) {
-  const [form, setForm] = useState({ full_name: profile?.full_name || '', username: profile?.username || '', bio: profile?.bio || '' })
+function SettingsModal({ profile, email, blockedUsers, onUnblock, onDeleteAccount, onClose, onSignOut, onSave, theme, setTheme, notify, notificationsEnabled, setNotificationsEnabled, notificationSoundEnabled, setNotificationSoundEnabled, enableNotificationSound, standalone = false }) {
+  const [section, setSection] = useState(() => window.location.hash === '#settings/profile' ? 'profile' : 'privacy')
+  const [form, setForm] = useState({
+    discoverable: profile?.discoverable ?? true,
+    show_online_status: profile?.show_online_status ?? true,
+    show_last_seen: profile?.show_last_seen ?? true,
+  })
+  const [profileForm, setProfileForm] = useState({
+    full_name: profile?.full_name || '',
+    username: profile?.username || '',
+    bio: profile?.bio || '',
+  })
   const [saving, setSaving] = useState(false)
+  const [savingProfile, setSavingProfile] = useState(false)
   const [avatarBusy, setAvatarBusy] = useState(false)
+  const [changingPassword, setChangingPassword] = useState(false)
+  const [password, setPassword] = useState('')
   const avatarInput = useRef(null)
 
-  async function save(event) {
+  useEffect(() => {
+    setProfileForm({
+      full_name: profile?.full_name || '',
+      username: profile?.username || '',
+      bio: profile?.bio || '',
+    })
+  }, [profile?.id, profile?.full_name, profile?.username, profile?.bio])
+
+  async function savePrivacy(event) {
     event.preventDefault()
     setSaving(true)
-    const success = await onSave({
-      full_name: form.full_name.trim(),
-      username: form.username.trim().replace(/^@/, '').toLowerCase(),
-      bio: form.bio.trim(),
-    })
+    const success = await onSave(form)
     setSaving(false)
-    if (success) { notify('Profile updated.'); onClose() }
+    if (success) notify('Privacy settings updated.')
+  }
+
+  async function saveProfile(event) {
+    event.preventDefault()
+    setSavingProfile(true)
+    const success = await onSave({
+      full_name: profileForm.full_name.trim(),
+      username: profileForm.username.trim().replace(/^@/, '').toLowerCase(),
+      bio: profileForm.bio.trim(),
+    })
+    setSavingProfile(false)
+    if (success) notify('Profile updated.')
   }
 
   async function uploadAvatar(file) {
@@ -1363,53 +1425,15 @@ function ProfileModal({ profile, email, onClose, onSave, notify }) {
     setAvatarBusy(true)
     const path = `${profile.id}/${crypto.randomUUID()}-${file.name.replace(/[^\w.-]/g, '_')}`
     const { error } = await supabase.storage.from('avatars').upload(path, file, { contentType: file.type })
-    if (error) { notify(error.message); setAvatarBusy(false); return }
+    if (error) {
+      notify(error.message)
+      setAvatarBusy(false)
+      return
+    }
     const { data } = supabase.storage.from('avatars').getPublicUrl(path)
     const success = await onSave({ avatar_url: data.publicUrl })
     setAvatarBusy(false)
     if (success) notify('Profile photo updated.')
-  }
-
-  return <div className="modal-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose() }}>
-    <section className="profile-modal profile-view">
-      <header className="modal-header"><div><span className="eyebrow">YOUR ACCOUNT</span><h2>My profile</h2></div><button className="icon-button" onClick={onClose} aria-label="Close profile"><X size={19} /></button></header>
-      <div className="profile-identity">
-        <Avatar profile={profile} size="xl" />
-        <div><h3>{profile?.full_name || 'Your name'}</h3><p>@{profile?.username}</p><button className="subtle-button" type="button" onClick={() => avatarInput.current?.click()}>{avatarBusy ? 'Uploading…' : 'Change photo'}</button></div>
-        <input ref={avatarInput} hidden type="file" accept="image/*" onChange={(event) => { uploadAvatar(event.target.files?.[0]); event.target.value = '' }} />
-      </div>
-      <form className="settings-form profile-edit-form" onSubmit={save}>
-        <label>Full name<input required value={form.full_name} maxLength="80" onChange={(event) => setForm({ ...form, full_name: event.target.value })} /></label>
-        <label>Username<div className="input-prefix"><span>@</span><input required pattern="[A-Za-z0-9_]{3,24}" maxLength="24" value={form.username} onChange={(event) => setForm({ ...form, username: event.target.value })} /></div></label>
-        <label>About<textarea rows="3" maxLength="160" value={form.bio} onChange={(event) => setForm({ ...form, bio: event.target.value })} placeholder="A little about you..." /></label>
-        <div className="profile-details">
-          <div><span>CHATTER ID</span><strong>{profile?.user_id || '—'}</strong></div>
-          <div><span>EMAIL ADDRESS</span><strong>{email || '—'}</strong></div>
-          <div><span>MEMBER SINCE</span><strong>{profile?.created_at ? new Intl.DateTimeFormat(undefined, { dateStyle: 'medium' }).format(new Date(profile.created_at)) : '—'}</strong></div>
-        </div>
-        <div className="modal-actions"><button type="button" className="subtle-button" onClick={onClose}>Cancel</button><button className="primary-button" disabled={saving}>{saving ? 'Saving…' : 'Save profile'}</button></div>
-      </form>
-    </section>
-  </div>
-}
-
-function SettingsModal({ profile, email, blockedUsers, onUnblock, onDeleteAccount, onClose, onSignOut, onSave, theme, setTheme, notify, notificationsEnabled, setNotificationsEnabled, notificationSoundEnabled, setNotificationSoundEnabled, enableNotificationSound }) {
-  const [section, setSection] = useState('privacy')
-  const [form, setForm] = useState({
-    discoverable: profile?.discoverable ?? true,
-    show_online_status: profile?.show_online_status ?? true,
-    show_last_seen: profile?.show_last_seen ?? true,
-  })
-  const [saving, setSaving] = useState(false)
-  const [changingPassword, setChangingPassword] = useState(false)
-  const [password, setPassword] = useState('')
-
-  async function savePrivacy(event) {
-    event.preventDefault()
-    setSaving(true)
-    const success = await onSave(form)
-    setSaving(false)
-    if (success) notify('Privacy settings updated.')
   }
 
   async function updatePassword(event) {
@@ -1422,6 +1446,7 @@ function SettingsModal({ profile, email, blockedUsers, onUnblock, onDeleteAccoun
   }
 
   const sections = [
+    { id: 'profile', title: 'Profile', icon: UserRound },
     { id: 'privacy', title: 'Privacy & visibility', icon: Users },
     { id: 'notifications', title: 'Notifications', icon: Bell },
     { id: 'appearance', title: 'Appearance', icon: MessageCircle },
@@ -1430,6 +1455,7 @@ function SettingsModal({ profile, email, blockedUsers, onUnblock, onDeleteAccoun
     { id: 'account', title: 'Account', icon: Info },
   ]
   const headings = {
+    profile: ['Profile', 'Update your name, username, photo, and bio.'],
     privacy: ['Privacy & visibility', 'Control what other people can see.'],
     notifications: ['Notifications', 'Choose how Chatter keeps you in the loop.'],
     appearance: ['Appearance', 'Personalize how Chatter looks on this device.'],
@@ -1438,11 +1464,11 @@ function SettingsModal({ profile, email, blockedUsers, onUnblock, onDeleteAccoun
     account: ['Account', 'Account details and sign-in actions.'],
   }
 
-  return <div className="modal-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose() }}>
+  return <div className={`modal-backdrop ${standalone ? 'settings-page-backdrop' : ''}`} onMouseDown={(event) => { if (!standalone && event.target === event.currentTarget) onClose() }}>
     <section className="settings-window">
       <header className="settings-topbar">
         <div><span className="settings-app-mark"><Settings size={16} /></span><strong>Settings</strong><span className="settings-divider">/</span><span>{headings[section][0]}</span></div>
-        <button className="icon-button" onClick={onClose} aria-label="Close settings"><X size={19} /></button>
+        <button className="icon-button" onClick={onClose} aria-label={standalone ? 'Back to chat' : 'Close settings'} title={standalone ? 'Back to chat' : 'Close settings'}>{standalone ? <ArrowLeft size={19} /> : <X size={19} />}</button>
       </header>
       <div className="settings-layout">
         <nav className="settings-nav" aria-label="Settings sections">
@@ -1452,6 +1478,24 @@ function SettingsModal({ profile, email, blockedUsers, onUnblock, onDeleteAccoun
         </nav>
         <div className="settings-content">
           <div className="settings-section-heading"><h2>{headings[section][0]}</h2><p>{headings[section][1]}</p></div>
+          {section === 'profile' && <div className="settings-options">
+            <div className="profile-identity settings-profile-identity">
+              <Avatar profile={profile} size="xl" />
+              <div><h3>{profile?.full_name || 'Your name'}</h3><p>@{profile?.username || 'username'}</p><button className="subtle-button" type="button" disabled={avatarBusy} onClick={() => avatarInput.current?.click()}>{avatarBusy ? 'Uploading…' : 'Change photo'}</button></div>
+              <input ref={avatarInput} hidden type="file" accept="image/*" onChange={(event) => { uploadAvatar(event.target.files?.[0]); event.target.value = '' }} />
+            </div>
+            <form className="settings-form profile-edit-form" onSubmit={saveProfile}>
+              <label>Full name<input required value={profileForm.full_name} maxLength="80" onChange={(event) => setProfileForm({ ...profileForm, full_name: event.target.value })} /></label>
+              <label>Username<div className="input-prefix"><span>@</span><input required pattern="[A-Za-z0-9_]{3,24}" maxLength="24" value={profileForm.username} onChange={(event) => setProfileForm({ ...profileForm, username: event.target.value })} /></div></label>
+              <label>About<textarea rows="3" maxLength="160" value={profileForm.bio} onChange={(event) => setProfileForm({ ...profileForm, bio: event.target.value })} placeholder="A little about you..." /></label>
+              <div className="profile-details">
+                <div><span>CHATTER ID</span><strong>{profile?.user_id || '—'}</strong></div>
+                <div><span>EMAIL ADDRESS</span><strong>{email || '—'}</strong></div>
+                <div><span>MEMBER SINCE</span><strong>{profile?.created_at ? new Intl.DateTimeFormat(undefined, { dateStyle: 'medium' }).format(new Date(profile.created_at)) : '—'}</strong></div>
+              </div>
+              <div className="settings-save-row"><button className="primary-button" disabled={savingProfile}>{savingProfile ? 'Saving…' : 'Save profile'}</button></div>
+            </form>
+          </div>}
           {section === 'privacy' && <form className="settings-options" onSubmit={savePrivacy}>
             <label className="setting-option"><span><strong>Profile discoverability</strong><small>Allow people to find you by username or Chatter ID.</small></span><input type="checkbox" checked={form.discoverable} onChange={(event) => setForm({ ...form, discoverable: event.target.checked })} /></label>
             <label className="setting-option"><span><strong>Online status</strong><small>Show your teammates when you’re currently online.</small></span><input type="checkbox" checked={form.show_online_status} onChange={(event) => setForm({ ...form, show_online_status: event.target.checked })} /></label>
