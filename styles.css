@@ -1062,6 +1062,23 @@ html[data-theme=dark] .voice-send-button, html[data-theme=dark] .voice-send-butt
 html[data-theme=dark] .group-member-search { background: #111d2a; }
 html[data-theme=dark] .group-photo-preview { background: #172638; }
 html[data-theme=dark] .notification-delete-button:hover, html[data-theme=dark] .notification-clear-button:hover { color: #ffaaa3; background: #452b2d; }
+.conversation-entry .conversation-row > .recent-chat-avatar {
+  width: clamp(38px, 4vw, 48px);
+  height: clamp(38px, 4vw, 48px);
+  flex: 0 0 clamp(38px, 4vw, 48px);
+}
+.chat-header > .avatar {
+  width: clamp(32px, 9vw, 42px);
+  height: clamp(32px, 9vw, 42px);
+  flex: 0 0 clamp(32px, 9vw, 42px);
+}
+@media (max-width: 700px) {
+  .conversation-entry .conversation-row > .recent-chat-avatar {
+    width: clamp(36px, 12vw, 48px);
+    height: clamp(36px, 12vw, 48px);
+    flex-basis: clamp(36px, 12vw, 48px);
+  }
+}
 
 @media (prefers-reduced-motion: reduce) {
   .settings-page-backdrop .settings-window { animation: none; }
