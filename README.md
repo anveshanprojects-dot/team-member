@@ -1,4 +1,4 @@
-# Anveshan Chatter
+# Anveshan Chat
 
 A responsive real-time messaging application built with React, Vite, Supabase Auth, Postgres, Realtime, and Storage.
 
@@ -6,7 +6,7 @@ A responsive real-time messaging application built with React, Vite, Supabase Au
 
 - Email/password sign-up and sign-in; sign-in accepts email or username. Supabase Auth handles password hashing, persistent sessions, verification, logout, and password reset.
 - Google sign-in through Supabase OAuth when the Google provider is enabled and configured in the Supabase project.
-- Unique usernames and generated Chatter IDs; search for users from the workspace search bar, subject to account privacy.
+- Unique usernames and generated Anveshan IDs; search for users from the workspace search bar, subject to account privacy.
 - Search results include a profile preview populated only from the privacy-aware `search_profiles` RPC.
 - Profile editing and profile photos in Settings, plus privacy controls and light/dark appearance.
 - Settings opens in a separate browser tab as a full-page view, with a back-to-chat control.
@@ -14,6 +14,7 @@ A responsive real-time messaging application built with React, Vite, Supabase Au
 - Friends can be unfriended from People, search results, and person details. Chats can be removed from your inbox without deleting the other participant’s history; leaving a group removes you from that group.
 - Pinned and recent conversation sections; pinned chats are saved per user in the current browser.
 - Realtime text messages, typing indicators, replies, message editing/deletion, reactions, forwarding, pinning, copy, read receipts, and unread counters, with older history loaded in pages.
+- Voice messages can be recorded, previewed, discarded, and sent; recipients can play them in the conversation.
 - Password reset links let users securely set and confirm a new password.
 - A Groups navigation section lists group conversations; groups can be created with selected friends and an optional group photo. Group admins can update the photo and add existing friends from the group details panel.
 - Private chat-file uploads and public profile photos, with size/type restrictions and Storage policies.
@@ -39,7 +40,7 @@ A responsive real-time messaging application built with React, Vite, Supabase Au
 
 2. In your Supabase project, open **SQL Editor**, paste the contents of [`supabase/schema.sql`](./supabase/schema.sql), and run it using a project owner account.
 
-   If email/password login works but Chatter shows a database setup screen or a `PGRST205` error, the Auth service is connected but the app tables have not been installed. Run this SQL step against the same Supabase project configured in `.env`, then use **Retry database connection** in the app.
+   If email/password login works but Anveshan Chat shows a database setup screen or a `PGRST205` error, the Auth service is connected but the app tables have not been installed. Run this SQL step against the same Supabase project configured in `.env`, then use **Retry database connection** in the app.
 
    If the existing database is already installed, do not rerun the full schema. Apply [`supabase/migrations/20261119000000_chat_performance_and_message_pins.sql`](./supabase/migrations/20261119000000_chat_performance_and_message_pins.sql) and [`supabase/migrations/20261120000000_users_delete_own_notifications.sql`](./supabase/migrations/20261120000000_users_delete_own_notifications.sql) in SQL Editor before deploying this version. They add the membership-checked pin and conversation-summary RPCs, ensure message/reaction/receipt tables are in the Realtime publication, and allow authenticated users to delete only their own notifications, without replacing existing data.
 

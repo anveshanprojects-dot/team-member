@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   ArrowLeft, ArrowUpRight, Bell, Check, CheckCheck,
   CircleHelp, Copy, File, FileText, Image, ImagePlus, Info, LogOut, Menu, MessageCircle, MoreHorizontal, Pin,
-  Mic, Paperclip, Plus, RefreshCw, Search, Send, Settings, Smile, Trash2, UserRound, Users, X,
+  Mic, Paperclip, Plus, RefreshCw, Search, Send, Settings, Smile, Square, Trash2, UserRound, Users, X,
 } from 'lucide-react'
 import { createClient } from '@supabase/supabase-js'
 
@@ -32,6 +32,10 @@ function initials(name = '?') {
 function formatTime(value) {
   if (!value) return ''
   return new Intl.DateTimeFormat(undefined, { hour: 'numeric', minute: '2-digit' }).format(new Date(value))
+}
+
+function formatDuration(seconds) {
+  return `${Math.floor(seconds / 60).toString().padStart(2, '0')}:${(seconds % 60).toString().padStart(2, '0')}`
 }
 
 function Avatar({ profile, size = 'normal', online = false }) {
@@ -129,7 +133,7 @@ function AuthScreen({ onAuthenticated }) {
   return (
     <main className="auth-page">
       <div className="auth-art">
-        <div className="brand brand-light"><span className="brand-mark"><MessageCircle size={23} /></span>Anveshan Chatter</div>
+        <div className="brand brand-light"><span className="brand-mark"><MessageCircle size={23} /></span>Anveshan Chat</div>
         <div className="art-copy">
           <div className="art-bubble bubble-one">The best conversations happen here. <span>✨</span></div>
           <div className="art-bubble bubble-two">Hey! Are we still on for coffee? <span>10:42</span></div>
@@ -144,7 +148,7 @@ function AuthScreen({ onAuthenticated }) {
         <div className="auth-card">
           <span className="eyebrow">{mode === 'register' ? 'GET STARTED' : mode === 'forgot' ? 'ACCOUNT RECOVERY' : 'YOUR PEOPLE ARE HERE'}</span>
           <h2>{heading}</h2>
-          <p className="muted">{mode === 'register' ? 'Join Anveshan Chatter and make room for more meaningful conversations.' : mode === 'forgot' ? 'We’ll send you a link to get back into your account.' : 'Sign in to pick up right where you left off.'}</p>
+          <p className="muted">{mode === 'register' ? 'Join Anveshan Chat and make room for more meaningful conversations.' : mode === 'forgot' ? 'We’ll send you a link to get back into your account.' : 'Sign in to pick up right where you left off.'}</p>
           {error && <div className="alert alert-error">{error}</div>}
           {message && <div className="alert alert-success">{message}</div>}
           <form onSubmit={submit} className="auth-form">
@@ -161,7 +165,7 @@ function AuthScreen({ onAuthenticated }) {
             <span>or</span>
             <button type="button" className="google-signin-button" disabled={busy} onClick={signInWithGoogle}><b>G</b>Continue with Google</button>
           </div>}
-          <p className="auth-switch">{mode === 'forgot' ? 'Remember your password?' : mode === 'register' ? 'Already have an account?' : 'New to Anveshan Chatter?'} <button className="text-button" onClick={() => { setMode(mode === 'register' || mode === 'forgot' ? 'login' : 'register'); setError(''); setMessage('') }}>{mode === 'register' || mode === 'forgot' ? 'Sign in' : 'Create an account'}</button></p>
+          <p className="auth-switch">{mode === 'forgot' ? 'Remember your password?' : mode === 'register' ? 'Already have an account?' : 'New to Anveshan Chat?'} <button className="text-button" onClick={() => { setMode(mode === 'register' || mode === 'forgot' ? 'login' : 'register'); setError(''); setMessage('') }}>{mode === 'register' || mode === 'forgot' ? 'Sign in' : 'Create an account'}</button></p>
           {mode !== 'register' && mode !== 'forgot' && <div className="auth-security"><Info size={14} /> Your chats are private and secured with Supabase Auth.</div>}
         </div>
       </section>
@@ -196,7 +200,7 @@ function PasswordRecoveryScreen({ onComplete }) {
     <p className="muted">{complete ? 'Your account is secure with the new password.' : 'Enter a new password for your account.'}</p>
     {error && <div className="alert alert-error" role="alert">{error}</div>}
     {complete
-      ? <button className="primary-button auth-submit" onClick={onComplete}>Continue to Anveshan Chatter <ArrowUpRight size={17} /></button>
+      ? <button className="primary-button auth-submit" onClick={onComplete}>Continue to Anveshan Chat <ArrowUpRight size={17} /></button>
       : <form onSubmit={submit} className="auth-form">
         <label>New password<input required type="password" autoComplete="new-password" minLength="8" value={password} onChange={(event) => setPassword(event.target.value)} /></label>
         <label>Confirm new password<input required type="password" autoComplete="new-password" minLength="8" value={confirmation} onChange={(event) => setConfirmation(event.target.value)} /></label>
@@ -238,6 +242,10 @@ function App() {
   const [showEmoji, setShowEmoji] = useState(false)
   const [showAttach, setShowAttach] = useState(false)
   const [recording, setRecording] = useState(false)
+  const [recordedVoice, setRecordedVoice] = useState(null)
+  const [voicePreviewUrl, setVoicePreviewUrl] = useState('')
+  const [recordingSeconds, setRecordingSeconds] = useState(0)
+  const [voiceSending, setVoiceSending] = useState(false)
   const [showSettings, setShowSettings] = useState(() => window.location.hash.startsWith('#settings'))
   const [showGroup, setShowGroup] = useState(false)
   const [showMobileMenu, setShowMobileMenu] = useState(false)
@@ -259,6 +267,9 @@ function App() {
   const typingChannel = useRef(null)
   const recorderRef = useRef(null)
   const streamRef = useRef(null)
+  const recordingTimerRef = useRef(null)
+  const recordingStartedAtRef = useRef(0)
+  const discardVoiceRecordingRef = useRef(false)
   const onlineUserIds = useRef(new Set())
   const notificationsEnabledRef = useRef(notificationsEnabled)
   const notificationSoundEnabledRef = useRef(notificationSoundEnabled)
@@ -266,6 +277,18 @@ function App() {
   const audioContextRef = useRef(null)
   const groupAvatarInputRef = useRef(null)
   const pullGestureRef = useRef(null)
+
+  useEffect(() => {
+    if (!recordedVoice) { setVoicePreviewUrl(''); return }
+    const previewUrl = URL.createObjectURL(recordedVoice)
+    setVoicePreviewUrl(previewUrl)
+    return () => URL.revokeObjectURL(previewUrl)
+  }, [recordedVoice])
+
+  useEffect(() => {
+    if (recorderRef.current?.state === 'recording') discardVoiceRecording()
+    setRecordedVoice(null)
+  }, [activeId])
 
   activeIdRef.current = activeId
   messagesRef.current = messages
@@ -307,7 +330,7 @@ function App() {
     settingsUrl.hash = 'settings'
     const settingsTab = window.open(settingsUrl.toString(), '_blank')
     if (!settingsTab) {
-      notify('Your browser blocked the Settings tab. Allow pop-ups for Anveshan Chatter and try again.')
+      notify('Your browser blocked the Settings tab. Allow pop-ups for Anveshan Chat and try again.')
       return
     }
     settingsTab.opener = null
@@ -433,7 +456,7 @@ function App() {
     if (!ownProfile) {
       const { data: created, error: createError } = await supabase.from('profiles').insert({
         id: user.id,
-        full_name: user.user_metadata?.full_name || 'New Chatter',
+        full_name: user.user_metadata?.full_name || 'New user',
         username: user.user_metadata?.username || `user_${user.id.slice(0, 8)}`,
       }).select(profileColumns).single()
       if (createError) notify(createError.message)
@@ -542,7 +565,7 @@ function App() {
           : [payload.new, ...current].slice(0, 100))
         playNotificationSound()
         if (notificationsEnabledRef.current && 'Notification' in window && Notification.permission === 'granted') {
-          new Notification(payload.new.title || 'Anveshan Chatter', {
+          new Notification(payload.new.title || 'Anveshan Chat', {
             body: payload.new.body || 'You have a new update.',
             silent: true,
             tag: payload.new.id,
@@ -790,7 +813,9 @@ function App() {
   }, [draft, session, activeId])
 
   useEffect(() => () => {
-    recorderRef.current?.stop()
+    discardVoiceRecordingRef.current = true
+    window.clearInterval(recordingTimerRef.current)
+    if (recorderRef.current?.state === 'recording') recorderRef.current.stop()
     streamRef.current?.getTracks().forEach((track) => track.stop())
   }, [])
 
@@ -1211,18 +1236,19 @@ function App() {
   }
 
   async function uploadFile(file) {
-    if (!file || !activeId) return
+    if (!file || !activeId) return false
+    const uploadMimeType = file.type.split(';', 1)[0].trim().toLowerCase()
     const allowed = new Set([
       'image/jpeg', 'image/png', 'image/gif', 'image/webp', 'video/mp4', 'video/webm', 'video/quicktime',
       'audio/mpeg', 'audio/mp4', 'audio/ogg', 'audio/webm', 'audio/wav', 'application/pdf', 'text/plain', 'text/csv',
-    ]).has(file.type)
-    if (!allowed) { notify('This file type is not supported.'); return }
-    if (file.size > 25 * 1024 * 1024) { notify('Files must be 25 MB or smaller.'); return }
+    ]).has(uploadMimeType)
+    if (!allowed) { notify('This file type is not supported.'); return false }
+    if (file.size > 25 * 1024 * 1024) { notify('Files must be 25 MB or smaller.'); return false }
     setBusy(true)
     const path = `${session.user.id}/${activeId}/${crypto.randomUUID()}-${file.name.replace(/[^\w.-]/g, '_')}`
-    const { error: storageError } = await supabase.storage.from('chat-files').upload(path, file, { upsert: false, contentType: file.type })
-    if (storageError) { notify(storageError.message); setBusy(false); return }
-    const kind = file.type.startsWith('image/') ? 'image' : file.type.startsWith('video/') ? 'video' : file.type.startsWith('audio/') ? 'audio' : 'file'
+    const { error: storageError } = await supabase.storage.from('chat-files').upload(path, file, { upsert: false, contentType: uploadMimeType })
+    if (storageError) { notify(storageError.message); setBusy(false); return false }
+    const kind = uploadMimeType.startsWith('image/') ? 'image' : uploadMimeType.startsWith('video/') ? 'video' : uploadMimeType.startsWith('audio/') ? 'audio' : 'file'
     const { error } = await supabase.from('messages').insert({
       conversation_id: activeId, sender_id: session.user.id,
       content: file.name, type: kind, attachment_url: path,
@@ -1230,13 +1256,23 @@ function App() {
     setBusy(false)
     if (error) notify(error.message)
     else setShowAttach(false)
+    return !error
+  }
+
+  function discardVoiceRecording() {
+    discardVoiceRecordingRef.current = true
+    window.clearInterval(recordingTimerRef.current)
+    if (recorderRef.current?.state === 'recording') recorderRef.current.stop()
+    else streamRef.current?.getTracks().forEach((track) => track.stop())
+    setRecording(false)
+    setRecordingSeconds(0)
   }
 
   async function toggleVoiceRecording() {
     if (recording) {
       recorderRef.current?.stop()
-      streamRef.current?.getTracks().forEach((track) => track.stop())
       setRecording(false)
+      window.clearInterval(recordingTimerRef.current)
       return
     }
     if (!navigator.mediaDevices?.getUserMedia || !window.MediaRecorder) {
@@ -1251,17 +1287,49 @@ function App() {
       const chunks = []
       recorder.ondataavailable = (event) => { if (event.data.size) chunks.push(event.data) }
       recorder.onstop = () => {
-        const voiceNote = new File(chunks, `voice-note-${Date.now()}.${mimeType === 'audio/mp4' ? 'm4a' : 'webm'}`, { type: recorder.mimeType || 'audio/webm' })
-        if (voiceNote.size) uploadFile(voiceNote)
+        const recordingType = recorder.mimeType || mimeType || chunks[0]?.type || 'audio/webm'
+        const extension = recordingType.includes('mp4') ? 'm4a' : recordingType.includes('ogg') ? 'ogg' : 'webm'
+        const voiceNote = new File(chunks, `voice-message-${Date.now()}.${extension}`, { type: recordingType })
+        if (!discardVoiceRecordingRef.current) {
+          if (voiceNote.size) setRecordedVoice(voiceNote)
+          else notify('No audio was captured. Check microphone permission and try again.')
+        }
+        discardVoiceRecordingRef.current = false
+        setRecording(false)
+        setRecordingSeconds(0)
+        window.clearInterval(recordingTimerRef.current)
         stream.getTracks().forEach((track) => track.stop())
+        streamRef.current = null
+        recorderRef.current = null
       }
       streamRef.current = stream
       recorderRef.current = recorder
+      discardVoiceRecordingRef.current = false
+      recordingStartedAtRef.current = Date.now()
       recorder.start()
       setRecording(true)
+      setRecordedVoice(null)
+      setRecordingSeconds(0)
+      recordingTimerRef.current = window.setInterval(() => {
+        setRecordingSeconds(Math.floor((Date.now() - recordingStartedAtRef.current) / 1000))
+      }, 1000)
     } catch (error) {
       stream?.getTracks().forEach((track) => track.stop())
+      streamRef.current = null
+      recorderRef.current = null
+      window.clearInterval(recordingTimerRef.current)
       notify(error.message || 'Microphone access was not granted.')
+    }
+  }
+
+  async function sendRecordedVoice() {
+    if (!recordedVoice || voiceSending || busy) return
+    setVoiceSending(true)
+    try {
+      const sent = await uploadFile(recordedVoice)
+      if (sent) setRecordedVoice(null)
+    } finally {
+      setVoiceSending(false)
     }
   }
 
@@ -1358,14 +1426,14 @@ function App() {
     enableNotificationSound,
   }
 
-  if (!supabase) return <div className="setup-screen"><div className="setup-card"><div className="brand"><span className="brand-mark"><MessageCircle size={23} /></span>Anveshan Chatter</div><h1>Almost there.</h1><p>Add your Supabase project URL and anon key to a <code>.env</code> file to connect Anveshan Chatter to its live backend.</p><pre>VITE_SUPABASE_URL=https://…supabase.co{'\n'}VITE_SUPABASE_ANON_KEY=…</pre><p>Then run <code>npm run dev</code>. See <a href="./README.md">README.md</a> for database setup.</p></div></div>
+  if (!supabase) return <div className="setup-screen"><div className="setup-card"><div className="brand"><span className="brand-mark"><MessageCircle size={23} /></span>Anveshan Chat</div><h1>Almost there.</h1><p>Add your Supabase project URL and anon key to a <code>.env</code> file to connect Anveshan Chat to its live backend.</p><pre>VITE_SUPABASE_URL=https://…supabase.co{'\n'}VITE_SUPABASE_ANON_KEY=…</pre><p>Then run <code>npm run dev</code>. See <a href="./README.md">README.md</a> for database setup.</p></div></div>
   if (initializing) return <div className="loading-screen"><span className="spinner spinner-large" /><span>Getting things ready…</span></div>
   if (passwordRecovery) return <PasswordRecoveryScreen onComplete={() => setPasswordRecovery(false)} />
   if (!session) return <AuthScreen onAuthenticated={setSession} />
   if (databaseSetupRequired) return <div className="setup-screen"><div className="setup-card">
-    <div className="brand"><span className="brand-mark"><MessageCircle size={23} /></span>Anveshan Chatter</div>
+    <div className="brand"><span className="brand-mark"><MessageCircle size={23} /></span>Anveshan Chat</div>
     <h1>Connect your database.</h1>
-    <p>Authentication is working, but Anveshan Chatter’s database tables are missing from this Supabase project. Messaging and profiles need the schema installed first.</p>
+    <p>Authentication is working, but Anveshan Chat’s database tables are missing from this Supabase project. Messaging and profiles need the schema installed first.</p>
     <ol className="database-setup-steps">
       <li>Open your Supabase project and go to <strong>SQL Editor</strong>.</li>
       <li>Open <code>supabase/schema.sql</code> in this project, copy its contents, and run them in SQL Editor.</li>
@@ -1472,7 +1540,7 @@ function App() {
     <main className={appClass}>
       <aside className={`sidebar ${showMobileMenu ? 'mobile-menu-open' : ''}`}>
         <header className="sidebar-header">
-          <div className="brand"><span className="brand-mark"><MessageCircle size={21} /></span>Anveshan Chatter</div>
+          <div className="brand"><span className="brand-mark"><MessageCircle size={21} /></span>Anveshan Chat</div>
           <div className="header-actions">
             <button className="icon-button" aria-label="Notifications" onClick={() => setTab(tab === 'notifications' ? 'chats' : 'notifications')}><Bell size={18} />{notifications.some((item) => !item.read_at) && <i className="notification-dot" />}</button>
             <button className="icon-button" aria-label="Settings" onClick={openSettingsPage}><Settings size={18} /></button>
@@ -1514,7 +1582,7 @@ function App() {
               <h3 className="people-section-heading">Friend requests</h3>
               {friendRequests.filter((request) => request.status === 'pending' && request.receiver_id === session.user.id).map((request) => <div className="people-request-row" key={request.id}>
                 <Avatar profile={request.sender} />
-                <span className="contact-copy"><strong>{request.sender?.full_name || 'Chatter user'}</strong><small>@{request.sender?.username || 'unknown'}</small></span>
+                <span className="contact-copy"><strong>{request.sender?.full_name || 'Anveshan user'}</strong><small>@{request.sender?.username || 'unknown'}</small></span>
                 <div className="people-request-actions">
                   <button className="primary-button" disabled={Boolean(friendRequestBusy)} onClick={() => respondFriendRequest(request, true)}>{friendRequestBusy === request.id ? '…' : 'Accept'}</button>
                   <button className="subtle-button" disabled={Boolean(friendRequestBusy)} onClick={() => respondFriendRequest(request, false)}>Reject</button>
@@ -1525,7 +1593,7 @@ function App() {
               <h3 className="people-section-heading">Sent requests</h3>
               {friendRequests.filter((request) => request.status === 'pending' && request.sender_id === session.user.id).map((request) => <div className="people-request-row" key={request.id}>
                 <Avatar profile={request.receiver} />
-                <span className="contact-copy"><strong>{request.receiver?.full_name || 'Chatter user'}</strong><small>@{request.receiver?.username || 'unknown'} · Waiting for a response</small></span>
+                <span className="contact-copy"><strong>{request.receiver?.full_name || 'Anveshan user'}</strong><small>@{request.receiver?.username || 'unknown'} · Waiting for a response</small></span>
               </div>)}
             </section>}
             <section className="people-contact-section">
@@ -1533,10 +1601,10 @@ function App() {
               {friends.length ? friends.map((person) => <div className="contact-row" key={person.id}>
                 <button className="contact-open" onClick={() => openDirect(person)}><Avatar profile={person} online={person.is_online} /><span className="contact-copy"><strong>{person.full_name}</strong><small>@{person.username}</small></span><MessageCircle size={17} /></button>
                 <button className="contact-remove" aria-label={`Unfriend ${person.full_name}`} title={`Unfriend ${person.full_name}`} onClick={() => removeFriend(person)}><X size={14} /><span>Unfriend</span></button>
-              </div>) : <div className="empty-sidebar"><div className="empty-icon"><Users size={20} /></div><strong>Your circle starts here</strong><span>Find people by username or Chatter ID.</span><button className="text-button" onClick={() => setTab('search')}>Find someone <ArrowUpRight size={14} /></button></div>}
+              </div>) : <div className="empty-sidebar"><div className="empty-icon"><Users size={20} /></div><strong>Your circle starts here</strong><span>Find people by username or Anveshan ID.</span><button className="text-button" onClick={() => setTab('search')}>Find someone <ArrowUpRight size={14} /></button></div>}
             </section>
           </>}
-          {tab === 'search' && <><form className="people-search" onSubmit={searchUsers}><Search size={17} /><input autoFocus value={userSearch} onChange={(event) => setUserSearch(event.target.value)} placeholder="Username or Chatter ID" /><button className="primary-button search-submit" disabled={searching}>{searching ? 'Searching…' : 'Search'}</button></form>{searchResults.map((person) => {
+          {tab === 'search' && <><form className="people-search" onSubmit={searchUsers}><Search size={17} /><input autoFocus value={userSearch} onChange={(event) => setUserSearch(event.target.value)} placeholder="Username or Anveshan ID" /><button className="primary-button search-submit" disabled={searching}>{searching ? 'Searching…' : 'Search'}</button></form>{searchResults.map((person) => {
             const isFriend = friends.some((friend) => friend.id === person.id)
             const request = friendRequests.find((item) =>
               (item.sender_id === session.user.id && item.receiver_id === person.id) ||
@@ -1561,10 +1629,10 @@ function App() {
                 <button className="primary-button result-message" onClick={() => openDirect(person)}>Message</button>
               </div>
             </div>
-          })}{!searching && userSearch && !searchResults.length && <div className="empty-sidebar"><strong>No one found</strong><span>Check the spelling or try their exact username or ID.</span></div>}<div className="search-hint"><Info size={14} />Search exact usernames or unique Chatter IDs.</div></>}
-          {tab === 'notifications' && (notifications.length ? notifications.map((notification) => <div className="activity-row" key={notification.id}><span className="activity-icon"><Bell size={15} /></span><span><strong>{notification.title || 'Chatter update'}</strong><small>{notification.body || notification.type}</small><small>{formatTime(notification.created_at)}</small></span><button className="icon-button notification-delete-button" onClick={() => deleteNotification(notification.id)} title="Delete notification" aria-label={`Delete notification: ${notification.title || notification.type}`}><Trash2 size={15} /></button></div>) : <div className="empty-sidebar"><div className="empty-icon"><Bell size={20} /></div><strong>Nothing new</strong><span>Your latest activity will appear here.</span></div>)}
+          })}{!searching && userSearch && !searchResults.length && <div className="empty-sidebar"><strong>No one found</strong><span>Check the spelling or try their exact username or ID.</span></div>}<div className="search-hint"><Info size={14} />Search exact usernames or unique Anveshan IDs.</div></>}
+          {tab === 'notifications' && (notifications.length ? notifications.map((notification) => <div className="activity-row" key={notification.id}><span className="activity-icon"><Bell size={15} /></span><span><strong>{notification.title || 'Anveshan Chat update'}</strong><small>{notification.body || notification.type}</small><small>{formatTime(notification.created_at)}</small></span><button className="icon-button notification-delete-button" onClick={() => deleteNotification(notification.id)} title="Delete notification" aria-label={`Delete notification: ${notification.title || notification.type}`}><Trash2 size={15} /></button></div>) : <div className="empty-sidebar"><div className="empty-icon"><Bell size={20} /></div><strong>Nothing new</strong><span>Your latest activity will appear here.</span></div>)}
         </div>
-        <footer className="sidebar-footer"><div className={`footer-status connection-${connectionStatus}`} role="status" aria-live="polite"><i />{connectionStatus === 'connected' ? 'Connected' : connectionStatus === 'disconnected' ? 'Reconnecting…' : 'Connecting…'}</div><button className="footer-help" onClick={() => notify('Tip: search for a username or Chatter ID to find friends.')}><CircleHelp size={15} /> Help & tips</button></footer>
+        <footer className="sidebar-footer"><div className={`footer-status connection-${connectionStatus}`} role="status" aria-live="polite"><i />{connectionStatus === 'connected' ? 'Connected' : connectionStatus === 'disconnected' ? 'Reconnecting…' : 'Connecting…'}</div><button className="footer-help" onClick={() => notify('Tip: search for a username or Anveshan ID to find friends.')}><CircleHelp size={15} /> Help & tips</button></footer>
       </aside>
 
       <section className={`chat-area ${activeConversation ? 'chat-area-active' : ''}`}>
@@ -1624,14 +1692,30 @@ function App() {
             <div ref={bottomRef} />
           </div>
           <form className="composer" onSubmit={sendMessage}>
-            {replyTo && <div className="replying-to"><span><strong>Replying to {replyTo.profiles?.full_name || 'yourself'}</strong><small>{replyTo.content}</small></span><button type="button" className="icon-button" onClick={() => setReplyTo(null)}><X size={16} /></button></div>}
-            {showEmoji && <div className="emoji-panel">{EMOJIS.map((emoji) => <button type="button" key={emoji} onClick={() => setDraft((current) => current + emoji)}>{emoji}</button>)}</div>}
-            {showAttach && <div className="attach-panel"><button type="button" onClick={() => { fileRef.current.accept = 'image/*'; fileRef.current.click() }}><span className="attach-image"><Image size={17} /></span>Photo or video</button><button type="button" onClick={() => { fileRef.current.accept = '*/*'; fileRef.current.click() }}><span className="attach-file"><File size={17} /></span>Document</button></div>}
-            <input ref={fileRef} hidden type="file" onChange={(event) => { uploadFile(event.target.files?.[0]); event.target.value = '' }} />
-            <button type="button" className={`composer-icon ${showAttach ? 'composer-active' : ''}`} onClick={() => { setShowAttach(!showAttach); setShowEmoji(false) }} title="Attach file"><Paperclip size={19} /></button>
-            <div className="composer-input"><input value={draft} onChange={(event) => { setDraft(event.target.value); startTyping() }} placeholder="Write a message..." aria-label="Write a message" /><button type="button" className="composer-icon emoji-button" onClick={() => { setShowEmoji(!showEmoji); setShowAttach(false) }} title="Add emoji"><Smile size={19} /></button></div>
-            {!draft.trim() && <button type="button" className={`composer-icon voice-button ${recording ? 'recording' : ''}`} onClick={toggleVoiceRecording} title={recording ? 'Stop voice message' : 'Record voice message'}><Mic size={18} /></button>}
-            <button className="send-button" disabled={!draft.trim() || busy} aria-label="Send message"><Send size={18} /></button>
+            {recording
+              ? <div className="voice-recording-controls" role="status" aria-live="polite">
+                <span className="voice-recording-indicator"><i /><Mic size={17} /></span>
+                <span className="voice-recording-copy"><strong>Recording voice message</strong><small>{formatDuration(recordingSeconds)}</small></span>
+                <button type="button" className="subtle-button voice-cancel-button" onClick={discardVoiceRecording}><X size={15} />Cancel</button>
+                <button type="button" className="primary-button voice-stop-button" onClick={toggleVoiceRecording} aria-label="Finish recording"><Square size={14} />Stop</button>
+              </div>
+              : recordedVoice
+                ? <div className="voice-review-controls">
+                  <span className="voice-review-icon"><Mic size={17} /></span>
+                  <audio src={voicePreviewUrl} controls preload="metadata" aria-label="Preview voice message" />
+                  <button type="button" className="subtle-button voice-cancel-button" disabled={voiceSending} onClick={() => setRecordedVoice(null)}><X size={15} />Discard</button>
+                  <button type="button" className="primary-button voice-send-button" disabled={voiceSending || busy} onClick={sendRecordedVoice}><Send size={15} />{voiceSending ? 'Sending…' : 'Send voice'}</button>
+                </div>
+                : <>
+                  {replyTo && <div className="replying-to"><span><strong>Replying to {replyTo.profiles?.full_name || 'yourself'}</strong><small>{replyTo.content}</small></span><button type="button" className="icon-button" onClick={() => setReplyTo(null)}><X size={16} /></button></div>}
+                  {showEmoji && <div className="emoji-panel">{EMOJIS.map((emoji) => <button type="button" key={emoji} onClick={() => setDraft((current) => current + emoji)}>{emoji}</button>)}</div>}
+                  {showAttach && <div className="attach-panel"><button type="button" onClick={() => { fileRef.current.accept = 'image/*'; fileRef.current.click() }}><span className="attach-image"><Image size={17} /></span>Photo or video</button><button type="button" onClick={() => { fileRef.current.accept = '*/*'; fileRef.current.click() }}><span className="attach-file"><File size={17} /></span>Document</button></div>}
+                  <input ref={fileRef} hidden type="file" onChange={(event) => { uploadFile(event.target.files?.[0]); event.target.value = '' }} />
+                  <button type="button" className={`composer-icon ${showAttach ? 'composer-active' : ''}`} onClick={() => { setShowAttach(!showAttach); setShowEmoji(false) }} title="Attach file"><Paperclip size={19} /></button>
+                  <div className="composer-input"><input value={draft} onChange={(event) => { setDraft(event.target.value); startTyping() }} placeholder="Write a message..." aria-label="Write a message" /><button type="button" className="composer-icon emoji-button" onClick={() => { setShowEmoji(!showEmoji); setShowAttach(false) }} title="Add emoji"><Smile size={19} /></button></div>
+                  {!draft.trim() && <button type="button" className="composer-icon voice-button" onClick={toggleVoiceRecording} title="Record voice message" aria-label="Record voice message"><Mic size={18} /></button>}
+                  <button className="send-button" disabled={!draft.trim() || busy} aria-label="Send message"><Send size={18} /></button>
+                </>}
           </form>
         </> : <div className="welcome-panel">
           <header className="workspace-topbar">
@@ -1669,7 +1753,7 @@ function App() {
             <button type="button" className="subtle-button group-photo-button" disabled={groupAvatarBusy} onClick={() => groupAvatarInputRef.current?.click()}><ImagePlus size={14} />{groupAvatarBusy ? 'Updating photo…' : activeConversation.avatar_url ? 'Change group photo' : 'Add group photo'}</button>
           </>}
           {!activeConversation.is_group && activeMember?.user_id && <>
-            <small>Chatter ID · {activeMember.user_id}</small>
+            <small>Anveshan ID · {activeMember.user_id}</small>
             <small>{activeMember.is_online ? 'Online now' : activeStatus?.last_seen_at ? `Last seen ${formatTime(activeStatus.last_seen_at)}` : 'Offline'}</small>
           </>}
         </div>
@@ -1935,8 +2019,8 @@ function SettingsModal({ profile, email, blockedUsers, onUnblock, onDeleteAccoun
   const headings = {
     profile: ['Profile', 'Update your name, username, photo, and bio.'],
     privacy: ['Privacy & visibility', 'Control what other people can see.'],
-    notifications: ['Notifications', 'Choose how Chatter keeps you in the loop.'],
-    appearance: ['Appearance', 'Personalize how Chatter looks on this device.'],
+    notifications: ['Notifications', 'Choose how Anveshan Chat keeps you in the loop.'],
+    appearance: ['Appearance', 'Personalize how Anveshan Chat looks on this device.'],
     security: ['Security', 'Manage your password and sign-in security.'],
     blocked: ['Blocked people', 'Review the accounts you have blocked.'],
     account: ['Account', 'Account details and sign-in actions.'],
@@ -1975,7 +2059,7 @@ function SettingsModal({ profile, email, blockedUsers, onUnblock, onDeleteAccoun
             </form>
           </div>}
           {section === 'privacy' && <form className="settings-options" onSubmit={savePrivacy}>
-            <label className="setting-option"><span><strong>Profile discoverability</strong><small>Allow people to find you by username or Chatter ID.</small></span><input type="checkbox" checked={form.discoverable} onChange={(event) => setForm({ ...form, discoverable: event.target.checked })} /></label>
+            <label className="setting-option"><span><strong>Profile discoverability</strong><small>Allow people to find you by username or Anveshan ID.</small></span><input type="checkbox" checked={form.discoverable} onChange={(event) => setForm({ ...form, discoverable: event.target.checked })} /></label>
             <label className="setting-option"><span><strong>Online status</strong><small>Show your teammates when you’re currently online.</small></span><input type="checkbox" checked={form.show_online_status} onChange={(event) => setForm({ ...form, show_online_status: event.target.checked })} /></label>
             <label className="setting-option"><span><strong>Last seen</strong><small>Show when you were last active to other people.</small></span><input type="checkbox" checked={form.show_last_seen} onChange={(event) => setForm({ ...form, show_last_seen: event.target.checked })} /></label>
             <div className="settings-save-row"><button className="primary-button" disabled={saving}>{saving ? 'Saving…' : 'Save changes'}</button></div>
@@ -1992,7 +2076,7 @@ function SettingsModal({ profile, email, blockedUsers, onUnblock, onDeleteAccoun
               if (!event.target.checked) { setNotificationSoundEnabled(false); return }
               if (await enableNotificationSound()) setNotificationSoundEnabled(true)
             }} /></label>
-            <div className="settings-info-card"><Bell size={17} /><span>Desktop notifications appear only while Anveshan Chatter is open and browser permission is enabled.</span></div>
+            <div className="settings-info-card"><Bell size={17} /><span>Desktop notifications appear only while Anveshan Chat is open and browser permission is enabled.</span></div>
           </div>}
           {section === 'appearance' && <div className="settings-options">
             <div className="setting-option"><span><strong>Theme</strong><small>Choose the appearance used on this device.</small></span><div className="theme-choice"><button className={theme === 'light' ? 'theme-choice-selected' : ''} onClick={() => setTheme('light')}><span className="theme-preview theme-preview-light" />Light</button><button className={theme === 'dark' ? 'theme-choice-selected' : ''} onClick={() => setTheme('dark')}><span className="theme-preview theme-preview-dark" />Dark</button></div></div>
@@ -2005,8 +2089,8 @@ function SettingsModal({ profile, email, blockedUsers, onUnblock, onDeleteAccoun
           {section === 'blocked' && <div className="settings-options">{blockedUsers.length ? <div className="blocked-list settings-blocked-list">{blockedUsers.map((userId) => <div key={userId}><span><strong>{userId}</strong><small>Blocked account</small></span><button type="button" className="subtle-button" onClick={() => onUnblock(userId)}>Unblock</button></div>)}</div> : <div className="settings-empty"><span><Users size={20} /></span><strong>No blocked accounts</strong><small>People you block will appear here.</small></div>}</div>}
           {section === 'account' && <div className="settings-options">
             <div className="account-summary"><Avatar profile={profile} /><span><strong>{profile?.full_name}</strong><small>{email}</small></span></div>
-            <div className="settings-info-card"><Info size={17} /><span>Your Chatter ID: <strong>{profile?.user_id}</strong></span></div>
-            <button type="button" className="subtle-button account-signout" onClick={onSignOut}><LogOut size={15} />Sign out of Anveshan Chatter</button>
+            <div className="settings-info-card"><Info size={17} /><span>Your Anveshan ID: <strong>{profile?.user_id}</strong></span></div>
+            <button type="button" className="subtle-button account-signout" onClick={onSignOut}><LogOut size={15} />Sign out of Anveshan Chat</button>
             <div className="account-danger-zone"><strong>Delete account</strong><p>Permanently delete your account, profile, and chat history.</p><button type="button" className="subtle-button danger-action" onClick={onDeleteAccount}>Delete my account</button></div>
           </div>}
         </div>
