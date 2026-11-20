@@ -197,7 +197,7 @@ function AvatarCropModal({ file, title, onCancel, onCrop }) {
       if (!blob) throw new Error('Could not create the cropped photo.')
       if (blob.size > 5 * 1024 * 1024) throw new Error('The cropped photo must be smaller than 5 MB.')
       const extension = blob.type === 'image/webp' ? 'webp' : blob.type === 'image/jpeg' ? 'jpg' : 'png'
-      onCrop(new File([blob], `avatar-${Date.now()}.${extension}`, { type: blob.type }))
+      onCrop(new window.File([blob], `avatar-${Date.now()}.${extension}`, { type: blob.type }))
     } catch (error) {
       setCropError(error.message || 'Could not crop this photo.')
     } finally {
@@ -1492,7 +1492,7 @@ function App() {
       recorder.onstop = () => {
         const recordingType = recorder.mimeType || mimeType || chunks[0]?.type || 'audio/webm'
         const extension = recordingType.includes('mp4') ? 'm4a' : recordingType.includes('ogg') ? 'ogg' : 'webm'
-        const voiceNote = new File(chunks, `voice-message-${Date.now()}.${extension}`, { type: recordingType })
+        const voiceNote = new window.File(chunks, `voice-message-${Date.now()}.${extension}`, { type: recordingType })
         if (!discardVoiceRecordingRef.current) {
           if (voiceNote.size) setRecordedVoice(voiceNote)
           else notify('No audio was captured. Check microphone permission and try again.')
