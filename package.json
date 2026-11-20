@@ -1,23 +1,17 @@
 {
-  "name": "chatter-web",
+  "name": "anveshan-call-signaling",
   "private": true,
   "version": "1.0.0",
   "type": "module",
   "scripts": {
-    "dev": "vite",
-    "build": "vite build",
-    "preview": "vite preview",
-    "test:calling": "npm --prefix signaling-server test"
+    "start": "node server.js",
+    "test": "node --test"
   },
   "dependencies": {
-    "@supabase/supabase-js": "^2.57.0",
-    "lucide-react": "^0.468.0",
-    "react": "^18.3.1",
-    "react-dom": "^18.3.1",
-    "socket.io-client": "^4.8.4"
+    "dotenv": "^18.0.10",
+    "socket.io": "^4.8.4"
   },
   "devDependencies": {
-    "@vitejs/plugin-react": "^4.3.4",
-    "vite": "^6.0.5"
+    "socket.io-client": "^4.8.4"
   }
 }
