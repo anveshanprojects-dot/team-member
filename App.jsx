@@ -1,8 +1,8 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   ArrowLeft, ArrowUpRight, Bell, Check, CheckCheck,
-  CircleHelp, Copy, File, FileText, Image, Info, LogOut, Menu, MessageCircle, MoreHorizontal, Pin,
-  Mic, Paperclip, Plus, Search, Send, Settings, Smile, Trash2, UserRound, Users, X,
+  CircleHelp, Copy, File, FileText, Image, ImagePlus, Info, LogOut, Menu, MessageCircle, MoreHorizontal, Pin,
+  Mic, Paperclip, Plus, RefreshCw, Search, Send, Settings, Smile, Trash2, UserRound, Users, X,
 } from 'lucide-react'
 import { createClient } from '@supabase/supabase-js'
 
@@ -10,6 +10,7 @@ const supabaseUrl = import.meta.env.VITE_SUPABASE_URL
 const supabaseKey = import.meta.env.VITE_SUPABASE_ANON_KEY
 const supabase = supabaseUrl && supabaseKey ? createClient(supabaseUrl, supabaseKey) : null
 const EMOJIS = ['😀', '😂', '🥰', '😍', '😊', '😎', '🥳', '😭', '👍', '❤️', '🔥', '🎉', '🙏', '✨', '👋', '🤔']
+const GROUP_IMAGE_EXTENSIONS = { 'image/jpeg': 'jpg', 'image/png': 'png', 'image/webp': 'webp' }
 const MESSAGE_PAGE_SIZE = 50
 
 async function addSignedAttachmentUrls(rows, onError) {
@@ -42,6 +43,15 @@ function Avatar({ profile, size = 'normal', online = false }) {
       {online && <i className="online-dot" />}
     </span>
   )
+}
+
+function GroupAvatar({ conversation, size = 'normal' }) {
+  const sizeClass = size === 'head' ? 'group-avatar-head' : size === 'xl' ? 'group-avatar-xl' : ''
+  return <span className={`group-avatar ${sizeClass}`}>
+    {conversation?.avatar_url
+      ? <img src={conversation.avatar_url} alt="" loading="lazy" decoding="async" />
+      : <Users size={size === 'xl' ? 25 : size === 'head' ? 18 : 19} />}
+  </span>
 }
 
 function AuthScreen({ onAuthenticated }) {
@@ -213,6 +223,7 @@ function App() {
   const [friendRequests, setFriendRequests] = useState([])
   const [friendRequestBusy, setFriendRequestBusy] = useState(null)
   const [groupMemberBusy, setGroupMemberBusy] = useState(null)
+  const [groupAvatarBusy, setGroupAvatarBusy] = useState(false)
   const [blockedUsers, setBlockedUsers] = useState([])
   const [notifications, setNotifications] = useState([])
   const [tab, setTab] = useState('chats')
@@ -230,6 +241,9 @@ function App() {
   const [showSettings, setShowSettings] = useState(() => window.location.hash.startsWith('#settings'))
   const [showGroup, setShowGroup] = useState(false)
   const [showMobileMenu, setShowMobileMenu] = useState(false)
+  const [pullRefreshProgress, setPullRefreshProgress] = useState(0)
+  const [pullRefreshing, setPullRefreshing] = useState(false)
+  const [manualRefreshKey, setManualRefreshKey] = useState(0)
   const [toast, setToast] = useState('')
   const [busy, setBusy] = useState(false)
   const [notificationsEnabled, setNotificationsEnabled] = useState(localStorage.getItem('chatter-notifications') === 'true')
@@ -250,6 +264,8 @@ function App() {
   const notificationSoundEnabledRef = useRef(notificationSoundEnabled)
   const notificationIdsRef = useRef(new Set())
   const audioContextRef = useRef(null)
+  const groupAvatarInputRef = useRef(null)
+  const pullGestureRef = useRef(null)
 
   activeIdRef.current = activeId
   messagesRef.current = messages
@@ -427,7 +443,7 @@ function App() {
     const [{ data: memberRows, error: convError }, { data: summaryRows, error: summaryError }, { data: friendRows, error: friendError },
       { data: requestRows, error: requestError }, { data: notificationRows, error: notificationError },
       { data: blockedRows, error: blockedError }] = await Promise.all([
-      supabase.from('conversation_members').select('conversation_id, conversations(id, name, description, is_group, created_by, updated_at, conversation_members(user_id, role, profiles(id, username, full_name, avatar_url, bio, show_online_status)))').eq('user_id', user.id),
+      supabase.from('conversation_members').select('conversation_id, conversations(id, name, description, avatar_url, is_group, created_by, updated_at, conversation_members(user_id, role, profiles(id, username, full_name, avatar_url, bio, show_online_status)))').eq('user_id', user.id),
       supabase.rpc('get_conversation_summaries'),
       supabase.from('friendships').select('user_id, friend_id, profiles!friendships_friend_id_fkey(id, username, full_name, avatar_url, bio, show_online_status)').eq('user_id', user.id),
       supabase.from('friend_requests')
@@ -745,7 +761,7 @@ function App() {
         window.setTimeout(() => setTypingUsers((current) => ({ ...current, [payload.userId]: false })), 2500)
       }).subscribe()
     return () => { alive = false; window.clearTimeout(refreshTimer); window.clearInterval(syncTimer); supabase.removeChannel(channel); if (typingChannel.current) supabase.removeChannel(typingChannel.current) }
-  }, [activeId, session, notify])
+  }, [activeId, session, notify, manualRefreshKey])
 
   useEffect(() => {
     if (!activeMember?.id || activeConversation?.is_group) { setActiveStatus(null); return }
@@ -992,7 +1008,7 @@ function App() {
     notify(resultMessage)
   }
 
-  async function createGroup(name, members) {
+  async function createGroup(name, members, photoFile) {
     setBusy(true)
     const { data: conversation, error } = await supabase.from('conversations').insert({ name: name.trim(), is_group: true, created_by: session.user.id }).select().single()
     if (error) { notify(error.message); setBusy(false); return }
@@ -1005,7 +1021,8 @@ function App() {
     setShowGroup(false)
     await loadWorkspace()
     setActiveId(conversation.id)
-    notify('Your group is ready.')
+    if (photoFile) await uploadGroupAvatar(photoFile, conversation)
+    else notify('Your group is ready.')
   }
 
   async function blockUser(userId) {
@@ -1033,6 +1050,46 @@ function App() {
     if (error) notify(error.message)
     else { notify('Member added.'); await loadWorkspace() }
     setGroupMemberBusy(null)
+  }
+
+  async function uploadGroupAvatar(file, conversation = activeConversation) {
+    if (!file || !conversation?.is_group) return false
+    const extension = GROUP_IMAGE_EXTENSIONS[file.type]
+    if (!extension || file.size > 5 * 1024 * 1024) {
+      notify('Choose a JPG, PNG, or WebP image smaller than 5 MB.')
+      return false
+    }
+    const isAdmin = conversation.created_by === session.user.id ||
+      conversation.members?.some((member) => member.id === session.user.id && member.role === 'admin')
+    if (!isAdmin) {
+      notify('Only group admins can change the group photo.')
+      return false
+    }
+    setGroupAvatarBusy(true)
+    const path = `${session.user.id}/groups/${conversation.id}/${crypto.randomUUID()}.${extension}`
+    const { error: uploadError } = await supabase.storage.from('avatars').upload(path, file, { contentType: file.type })
+    if (uploadError) {
+      notify(uploadError.message)
+      setGroupAvatarBusy(false)
+      return false
+    }
+    const { data: { publicUrl } } = supabase.storage.from('avatars').getPublicUrl(path)
+    const { error: updateError } = await supabase.from('conversations')
+      .update({ avatar_url: publicUrl }).eq('id', conversation.id)
+    if (updateError) {
+      const { error: cleanupError } = await supabase.storage.from('avatars').remove([path])
+      notify(cleanupError
+        ? `${updateError.message} The uploaded photo could not be cleaned up: ${cleanupError.message}`
+        : updateError.message)
+      setGroupAvatarBusy(false)
+      return false
+    }
+    setConversations((current) => current.map((item) =>
+      item.id === conversation.id ? { ...item, avatar_url: publicUrl } : item
+    ))
+    setGroupAvatarBusy(false)
+    notify('Group photo updated.')
+    return true
   }
 
   async function removeGroupMember(userId) {
@@ -1347,8 +1404,9 @@ function App() {
     const isPinned = pinnedConversationIds.includes(conversation.id)
     return <div className="conversation-entry" key={conversation.id}>
       <button className={`conversation-row ${selected ? 'conversation-selected' : ''}`} onClick={() => { setActiveId(conversation.id); setShowMobileMenu(false) }}>
-        <Avatar profile={conversation.is_group ? null : person} online={!conversation.is_group && person?.is_online} size="large" />
-        {conversation.is_group && <span className="group-avatar"><Users size={19} /></span>}
+        {conversation.is_group
+          ? <GroupAvatar conversation={conversation} />
+          : <Avatar profile={person} online={person?.is_online} size="large" />}
         <span className="conversation-copy">
           <span className="conversation-title">{conversation.is_group ? conversation.name : person?.full_name || person?.username || 'Unknown user'}</span>
           <span className="conversation-preview">{conversation.last_message?.sender_id === session.user.id ? 'You: ' : ''}{conversation.last_message?.content || (conversation.is_group ? 'Group conversation' : 'Say hello 👋')}</span>
@@ -1361,6 +1419,52 @@ function App() {
       <button type="button" className="conversation-delete" aria-label={conversation.is_group ? 'Leave group and remove chat' : 'Delete chat for me'} title={conversation.is_group ? 'Leave group and remove chat' : 'Delete chat for me'} onClick={() => deleteChat(conversation)}>
         <Trash2 size={15} />
       </button>
+    </div>
+  }
+
+  function handlePullTouchStart(event) {
+    if (!window.matchMedia('(max-width: 700px)').matches || pullRefreshing || event.currentTarget.scrollTop > 0) return
+    const touch = event.touches[0]
+    if (touch) pullGestureRef.current = { startY: touch.clientY, target: event.currentTarget, progress: 0 }
+  }
+
+  function handlePullTouchMove(event) {
+    const gesture = pullGestureRef.current
+    if (!gesture || gesture.target !== event.currentTarget || event.currentTarget.scrollTop > 0) return
+    const touch = event.touches[0]
+    if (!touch) return
+    const delta = touch.clientY - gesture.startY
+    const progress = Math.min(1, Math.max(0, delta / 72))
+    gesture.progress = progress
+    setPullRefreshProgress(Math.round(progress * 10) / 10)
+  }
+
+  async function handlePullTouchEnd(event) {
+    const gesture = pullGestureRef.current
+    if (!gesture || gesture.target !== event.currentTarget) return
+    pullGestureRef.current = null
+    setPullRefreshProgress(0)
+    if (gesture.progress < 1 || pullRefreshing) return
+    setPullRefreshing(true)
+    try {
+      await loadWorkspace()
+      setManualRefreshKey((current) => current + 1)
+    } finally {
+      setPullRefreshing(false)
+    }
+  }
+
+  function cancelPullGesture() {
+    pullGestureRef.current = null
+    setPullRefreshProgress(0)
+  }
+
+  function renderPullRefreshIndicator() {
+    const visible = pullRefreshing || pullRefreshProgress > 0
+    const label = pullRefreshing ? 'Refreshing…' : pullRefreshProgress >= 1 ? 'Release to refresh' : 'Pull to refresh'
+    return <div className={`pull-refresh-indicator ${visible ? 'pull-refresh-visible' : ''} ${pullRefreshing ? 'pull-refresh-active' : ''}`} role="status" aria-live="polite">
+      <RefreshCw size={14} style={{ transform: `rotate(${pullRefreshProgress * 180}deg)` }} />
+      <span>{label}</span>
     </div>
   }
 
@@ -1388,7 +1492,8 @@ function App() {
           <button className={tab === 'contacts' ? 'nav-item selected' : 'nav-item'} onClick={() => setTab('contacts')}><UserRound size={18} />People<span className="nav-count">{friends.length}</span></button>
         </nav>
         <div className="list-heading"><span>{tab === 'chats' ? 'CHATS' : tab === 'groups' ? 'GROUPS' : tab === 'contacts' ? 'PEOPLE' : tab === 'search' ? 'FIND TEAMMATES' : tab === 'notifications' ? 'RECENT ACTIVITY' : 'CHATS'}</span>{(tab === 'chats' || tab === 'groups') && <button className="icon-button small-icon" onClick={() => setShowGroup(true)} title="Create a group"><Plus size={17} /></button>}{tab === 'notifications' && notifications.length > 0 && <button className="icon-button small-icon notification-clear-button" onClick={clearNotifications} title="Delete all notifications" aria-label="Delete all notifications"><Trash2 size={15} /></button>}</div>
-        <div className="sidebar-list">
+        <div className="sidebar-list" onTouchStart={handlePullTouchStart} onTouchMove={handlePullTouchMove} onTouchEnd={handlePullTouchEnd} onTouchCancel={cancelPullGesture}>
+          {renderPullRefreshIndicator()}
           {tab === 'chats' && (filteredConversations.length ? <>
             {pinnedConversations.length > 0 && <section className="chat-list-section">
               <h3 className="chat-list-section-heading"><Pin size={13} />Pinned</h3>
@@ -1466,11 +1571,12 @@ function App() {
         {activeConversation ? <>
           <header className="chat-header">
             <button className="icon-button back-button" onClick={() => setActiveId(null)} aria-label="Back to conversations"><ArrowLeft size={19} /></button>
-            {activeConversation.is_group ? <span className="group-avatar group-avatar-head"><Users size={18} /></span> : <Avatar profile={activeMember} online={activeMember?.is_online} />}
+            {activeConversation.is_group ? <GroupAvatar conversation={activeConversation} size="head" /> : <Avatar profile={activeMember} online={activeMember?.is_online} />}
             <button className="chat-person" onClick={() => setShowInfo(!showInfo)}><strong>{activeTitle}</strong><small>{activeConversation.is_group ? `${activeConversation.members?.length || 0} members` : activeMember?.is_online ? 'Online now' : activeStatus?.last_seen_at ? `Last seen ${formatTime(activeStatus.last_seen_at)}` : 'Offline'}</small></button>
             <div className="chat-header-actions"><button className="icon-button" title="Search all messages in this conversation" aria-label="Search messages" onClick={searchConversation}><Search size={18} /></button><button className="icon-button" onClick={() => setShowInfo(!showInfo)} title="Conversation details"><MoreHorizontal size={19} /></button></div>
           </header>
-          <div className="chat-canvas" ref={chatCanvasRef}>
+          <div className="chat-canvas" ref={chatCanvasRef} onTouchStart={handlePullTouchStart} onTouchMove={handlePullTouchMove} onTouchEnd={handlePullTouchEnd} onTouchCancel={cancelPullGesture}>
+            {renderPullRefreshIndicator()}
             {hasOlderMessages && <button className="load-older-button" type="button" onClick={loadOlderMessages} disabled={loadingOlderMessages}>{loadingOlderMessages ? 'Loading…' : 'Load older messages'}</button>}
             <div className="conversation-date"><span>CONVERSATION</span></div>
             {messagesLoading && <div className="message-skeleton-list" aria-label="Loading messages">
@@ -1555,9 +1661,13 @@ function App() {
       {showInfo && activeConversation && <aside className="info-panel">
         <header><strong>Details</strong><button className="icon-button" onClick={() => setShowInfo(false)}><X size={18} /></button></header>
         <div className="info-person">
-          {activeConversation.is_group ? <span className="group-avatar group-avatar-xl"><Users size={25} /></span> : <Avatar profile={activeMember} size="xl" online={activeMember?.is_online} />}
+          {activeConversation.is_group ? <GroupAvatar conversation={activeConversation} size="xl" /> : <Avatar profile={activeMember} size="xl" online={activeMember?.is_online} />}
           <strong>{activeTitle}</strong>
           <span>{activeConversation.is_group ? `Group · ${activeConversation.members?.length || 0} members` : `@${activeMember?.username}`}</span>
+          {activeConversation.is_group && activeConversation.members.some((member) => member.id === session.user.id && member.role === 'admin') && <>
+            <input ref={groupAvatarInputRef} hidden type="file" accept="image/jpeg,image/png,image/webp" onChange={(event) => { uploadGroupAvatar(event.target.files?.[0]); event.target.value = '' }} />
+            <button type="button" className="subtle-button group-photo-button" disabled={groupAvatarBusy} onClick={() => groupAvatarInputRef.current?.click()}><ImagePlus size={14} />{groupAvatarBusy ? 'Updating photo…' : activeConversation.avatar_url ? 'Change group photo' : 'Add group photo'}</button>
+          </>}
           {!activeConversation.is_group && activeMember?.user_id && <>
             <small>Chatter ID · {activeMember.user_id}</small>
             <small>{activeMember.is_online ? 'Online now' : activeStatus?.last_seen_at ? `Last seen ${formatTime(activeStatus.last_seen_at)}` : 'Offline'}</small>
@@ -1908,12 +2018,42 @@ function SettingsModal({ profile, email, blockedUsers, onUnblock, onDeleteAccoun
 function GroupModal({ friends, onClose, onCreate, busy }) {
   const [name, setName] = useState('')
   const [selected, setSelected] = useState([])
-  return <div className="modal-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose() }}><form className="group-modal" onSubmit={(event) => { event.preventDefault(); if (name.trim()) onCreate(name, selected) }}>
+  const [photoFile, setPhotoFile] = useState(null)
+  const [photoPreview, setPhotoPreview] = useState('')
+  const [photoError, setPhotoError] = useState('')
+  const photoInputRef = useRef(null)
+
+  useEffect(() => {
+    if (!photoFile) { setPhotoPreview(''); return }
+    const previewUrl = URL.createObjectURL(photoFile)
+    setPhotoPreview(previewUrl)
+    return () => URL.revokeObjectURL(previewUrl)
+  }, [photoFile])
+
+  function choosePhoto(file) {
+    setPhotoError('')
+    if (!file) { setPhotoFile(null); return }
+    if (!GROUP_IMAGE_EXTENSIONS[file.type] || file.size > 5 * 1024 * 1024) {
+      setPhotoFile(null)
+      setPhotoError('Choose a JPG, PNG, or WebP image smaller than 5 MB.')
+      return
+    }
+    setPhotoFile(file)
+  }
+
+  return <div className="modal-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose() }}><form className="group-modal" onSubmit={(event) => { event.preventDefault(); if (name.trim()) onCreate(name, selected, photoFile) }}>
     <header className="modal-header"><div><span className="eyebrow">BRING YOUR PEOPLE TOGETHER</span><h2>Create a group</h2></div><button type="button" className="icon-button" onClick={onClose}><X size={19} /></button></header>
     <label>Group name<input required autoFocus value={name} onChange={(event) => setName(event.target.value)} placeholder="e.g. Weekend plans" maxLength="80" /></label>
+    <div className="group-photo-picker">
+      <span className="group-photo-preview">{photoPreview ? <img src={photoPreview} alt="" /> : <Users size={20} />}</span>
+      <span><strong>Group photo</strong><small>{photoFile?.name || 'Optional · JPG, PNG, or WebP · up to 5 MB'}</small></span>
+      <input ref={photoInputRef} hidden type="file" accept="image/jpeg,image/png,image/webp" onChange={(event) => { choosePhoto(event.target.files?.[0]); event.target.value = '' }} />
+      <button type="button" className="subtle-button" onClick={() => photoInputRef.current?.click()}><ImagePlus size={14} />Choose</button>
+      {photoError && <small className="group-photo-error" role="alert">{photoError}</small>}
+    </div>
     <div className="group-friends-title">ADD FRIENDS <span>{selected.length} selected</span></div>
     <div className="group-friends-list">{friends.length ? friends.map((friend) => <label className="group-friend" key={friend.id}><Avatar profile={friend} /><span><strong>{friend.full_name}</strong><small>@{friend.username}</small></span><input type="checkbox" checked={selected.includes(friend.id)} onChange={(event) => setSelected(event.target.checked ? [...selected, friend.id] : selected.filter((id) => id !== friend.id))} /></label>) : <div className="group-no-friends">Add some friends before creating a group.</div>}</div>
-    <div className="modal-actions"><button type="button" className="subtle-button" onClick={onClose}>Cancel</button><button className="primary-button" disabled={!name.trim() || !selected.length || busy}>{busy ? 'Creating…' : 'Create group'}</button></div>
+    <div className="modal-actions"><button type="button" className="subtle-button" onClick={onClose}>Cancel</button><button className="primary-button" disabled={!name.trim() || !selected.length || busy || Boolean(photoError)}>{busy ? 'Creating…' : 'Create group'}</button></div>
   </form></div>
 }
 
