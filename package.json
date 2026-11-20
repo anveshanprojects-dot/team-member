@@ -6,13 +6,15 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "test:calling": "npm --prefix signaling-server test"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.57.0",
     "lucide-react": "^0.468.0",
     "react": "^18.3.1",
-    "react-dom": "^18.3.1"
+    "react-dom": "^18.3.1",
+    "socket.io-client": "^4.8.4"
   },
   "devDependencies": {
     "@vitejs/plugin-react": "^4.3.4",

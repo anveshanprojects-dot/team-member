@@ -15,6 +15,8 @@ A responsive real-time messaging application built with React, Vite, Supabase Au
 - Pinned and recent conversation sections; pinned chats are saved per user in the current browser.
 - Realtime text messages, typing indicators, replies, message editing/deletion, reactions, forwarding, pinning, copy, read receipts, and unread counters, with older history loaded in pages.
 - Voice messages can be recorded, previewed, discarded, and sent; recipients can play them in the conversation.
+- One-to-one audio and video calls use WebRTC with an independent Socket.IO signaling service. Call controls include accept/reject, mute, camera, speaker control, duration, fullscreen, and picture-in-picture where supported.
+- Calling presence (online, busy, and in-call) is held in signaling-server memory; call signaling and presence are not written to the chat database. Online-visibility settings are applied to calling presence.
 - Password reset links let users securely set and confirm a new password.
 - A Groups navigation section lists group conversations; groups can be created with selected friends and an optional group photo. Group admins can update the photo and add existing friends from the group details panel.
 - Private chat-file uploads and public profile photos, with size/type restrictions and Storage policies.
@@ -76,13 +78,39 @@ A responsive real-time messaging application built with React, Vite, Supabase Au
 
 ## Configuration and deployment
 
-Run `npm run build` to generate the static site in `dist/`. Deploy `dist/` to any static host (for example, Vercel, Netlify, or Cloudflare Pages), set the two `VITE_SUPABASE_*` environment variables in the host, deploy both Edge Functions, and configure the Supabase Site URL and redirect allow list to your production domain. The host should serve `index.html` for the root route.
+Run `npm run build` to generate the static site in `dist/`. Deploy `dist/` to any static host (for example, Vercel, Netlify, or Cloudflare Pages), set `VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY`, and `VITE_SIGNALING_SERVER_URL` in the host, deploy both Edge Functions, and configure the Supabase Site URL and redirect allow list to your production domain. The host should serve `index.html` for the root route.
+
+### Audio and video calling
+
+The calling service is a separate Node.js application under [`signaling-server/`](./signaling-server/). It keeps connected sockets, presence, invitations, active calls, and temporary WebRTC signaling only in memory. It verifies the existing Supabase Auth access token through the Supabase Auth user endpoint; it does not read or write Supabase Database, save call history, or record media.
+
+For local development, set `VITE_SIGNALING_SERVER_URL` in the root `.env` to the signaling service URL and start both processes in separate terminals:
+
+```sh
+npm --prefix signaling-server ci
+npm --prefix signaling-server start
+npm run dev
+```
+
+Configure the signaling service using `signaling-server/.env.example`. Set `SUPABASE_URL` and `SUPABASE_ANON_KEY` to the same Supabase project used by the app, and set `FRONTEND_ORIGINS` to the exact allowed browser origins. The server calls only the Auth REST endpoint to validate tokens. For production, deploy `signaling-server/` as a Node.js web service (for example, on Render) with `signaling-server/` as its root directory, Node.js 20+, HTTPS/WSS, a health-check path of `/health`, a build command of `npm ci`, and a start command of `npm start`. Configure these environment values:
+
+- `NODE_ENV=production`
+- `SUPABASE_URL` and `SUPABASE_ANON_KEY`
+- `FRONTEND_ORIGINS` containing only the HTTPS GitHub Pages origin (no path)
+- `STUN_URLS`, and `TURN_URLS` plus `TURN_SHARED_SECRET` from a trusted TURN provider for networks that require relay
+- `TURN_CREDENTIAL_TTL_SECONDS` and `CALL_RING_TIMEOUT_MS` as needed
+
+Never put `TURN_SHARED_SECRET` or static TURN credentials in frontend variables. The service generates short-lived TURN credentials for authenticated sockets. A public STUN server alone cannot guarantee connectivity through restrictive NATs or firewalls; configure a production TURN provider and test from separate networks.
+
+In the GitHub repository, add `VITE_SIGNALING_SERVER_URL` as an Actions secret with the deployed HTTPS signaling-service URL, alongside the two existing Supabase secrets. The Pages workflow requires it and builds it into the static app. Set the Supabase Auth Site URL and redirect allow list to the GitHub Pages URL. Calls require an authenticated user, a secure browser context (HTTPS, or localhost in development), and microphone/camera permission.
+
+Run the signaling tests with `npm run test:calling`. Verify real audio/video, mobile permissions, and TURN relay with two signed-in accounts on different devices and networks after deploying the service; these network-dependent tests cannot be completed by the local unit suite.
 
 ### GitHub Pages
 
 The included GitHub Actions workflow automatically builds and deploys the app when a commit is pushed to `main` or `master`—including commits made by uploading files through GitHub. Upload the project source (not `node_modules`, `.env`, or `dist`) and keep `package.json`, `package-lock.json`, and `index.html` together in the repository root or in one uploaded project folder. The workflow locates that project folder and can move root-level `App.jsx`, `main.jsx`, and `styles.css` into `src/` when needed.
 
-Add `VITE_SUPABASE_URL` and `VITE_SUPABASE_ANON_KEY` as repository Actions secrets under **Settings → Secrets and variables → Actions**. Set **Settings → Pages → Build and deployment → Source** to **GitHub Actions**. The build uses the correct asset path for a project page (for example, `owner.github.io/repository/`) or a user/organization page (`owner.github.io/`). After deployment, add the GitHub Pages URL to the Supabase Auth site's URL and redirect allow list.
+Add `VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY`, and `VITE_SIGNALING_SERVER_URL` as repository Actions secrets under **Settings → Secrets and variables → Actions**. Set **Settings → Pages → Build and deployment → Source** to **GitHub Actions**. The build uses the correct asset path for a project page (for example, `owner.github.io/repository/`) or a user/organization page (`owner.github.io/`). After deployment, add the GitHub Pages URL to the Supabase Auth site's URL and redirect allow list.
 
 The project SQL installs the database tables, indexes, profile/signup triggers, private username lookup table for the Edge Function, RPCs, notifications, storage buckets, realtime publication entries, and row-level security policies. Review and test schema changes in a non-production Supabase project before deploying them to production.
 
