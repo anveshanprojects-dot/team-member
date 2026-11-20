@@ -2042,7 +2042,9 @@ function SettingsModal({ profile, email, blockedUsers, onUnblock, onDeleteAccoun
           <div className="settings-section-heading"><h2>{headings[section][0]}</h2><p>{headings[section][1]}</p></div>
           {section === 'profile' && <div className="settings-options">
             <div className="profile-identity settings-profile-identity">
-              <Avatar profile={profile} size="xl" />
+              <div className="settings-avatar-frame" role="img" aria-label="Profile photo">
+                <Avatar profile={profile} size="xl" />
+              </div>
               <div><h3>{profile?.full_name || 'Your name'}</h3><p>@{profile?.username || 'username'}</p><button className="subtle-button" type="button" disabled={avatarBusy} onClick={() => avatarInput.current?.click()}>{avatarBusy ? 'Uploading…' : 'Change photo'}</button></div>
               <input ref={avatarInput} hidden type="file" accept="image/*" onChange={(event) => { uploadAvatar(event.target.files?.[0]); event.target.value = '' }} />
             </div>
