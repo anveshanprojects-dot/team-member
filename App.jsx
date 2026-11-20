@@ -13,6 +13,22 @@ const EMOJIS = ['😀', '😂', '🥰', '😍', '😊', '😎', '🥳', '😭', 
 const GROUP_IMAGE_EXTENSIONS = { 'image/jpeg': 'jpg', 'image/png': 'png', 'image/webp': 'webp' }
 const MESSAGE_PAGE_SIZE = 50
 
+function getImageDimensions(file) {
+  return new Promise((resolve, reject) => {
+    const imageUrl = URL.createObjectURL(file)
+    const image = new window.Image()
+    image.onload = () => {
+      URL.revokeObjectURL(imageUrl)
+      resolve({ width: image.naturalWidth, height: image.naturalHeight })
+    }
+    image.onerror = () => {
+      URL.revokeObjectURL(imageUrl)
+      reject(new Error('Could not read this image. Choose a valid JPG, PNG, or WebP file.'))
+    }
+    image.src = imageUrl
+  })
+}
+
 async function addSignedAttachmentUrls(rows, onError) {
   return Promise.all(rows.map(async (message) => {
     if (!message.attachment_url) return message
@@ -1980,22 +1996,31 @@ function SettingsModal({ profile, email, blockedUsers, onUnblock, onDeleteAccoun
 
   async function uploadAvatar(file) {
     if (!file || !profile?.id) return
-    if (!file.type.startsWith('image/') || file.size > 5 * 1024 * 1024) {
-      notify('Choose an image smaller than 5 MB.')
+    if (!GROUP_IMAGE_EXTENSIONS[file.type] || file.size > 5 * 1024 * 1024) {
+      notify('Choose a JPG, PNG, or WebP image smaller than 5 MB.')
       return
     }
     setAvatarBusy(true)
-    const path = `${profile.id}/${crypto.randomUUID()}-${file.name.replace(/[^\w.-]/g, '_')}`
-    const { error } = await supabase.storage.from('avatars').upload(path, file, { contentType: file.type })
-    if (error) {
-      notify(error.message)
+    try {
+      const { width, height } = await getImageDimensions(file)
+      if (width !== height || width < 640 || width > 1080) {
+        notify('Profile photos must be square and between 640 × 640 and 1080 × 1080 pixels.')
+        return
+      }
+      const path = `${profile.id}/${crypto.randomUUID()}-${file.name.replace(/[^\w.-]/g, '_')}`
+      const { error } = await supabase.storage.from('avatars').upload(path, file, { contentType: file.type })
+      if (error) {
+        notify(error.message)
+        return
+      }
+      const { data } = supabase.storage.from('avatars').getPublicUrl(path)
+      const success = await onSave({ avatar_url: data.publicUrl })
+      if (success) notify('Profile photo updated.')
+    } catch (error) {
+      notify(error.message || 'Could not validate this profile photo.')
+    } finally {
       setAvatarBusy(false)
-      return
     }
-    const { data } = supabase.storage.from('avatars').getPublicUrl(path)
-    const success = await onSave({ avatar_url: data.publicUrl })
-    setAvatarBusy(false)
-    if (success) notify('Profile photo updated.')
   }
 
   async function updatePassword(event) {
@@ -2045,8 +2070,8 @@ function SettingsModal({ profile, email, blockedUsers, onUnblock, onDeleteAccoun
               <div className="settings-avatar-frame" role="img" aria-label="Profile photo">
                 <Avatar profile={profile} size="xl" />
               </div>
-              <div><h3>{profile?.full_name || 'Your name'}</h3><p>@{profile?.username || 'username'}</p><button className="subtle-button" type="button" disabled={avatarBusy} onClick={() => avatarInput.current?.click()}>{avatarBusy ? 'Uploading…' : 'Change photo'}</button></div>
-              <input ref={avatarInput} hidden type="file" accept="image/*" onChange={(event) => { uploadAvatar(event.target.files?.[0]); event.target.value = '' }} />
+              <div><h3>{profile?.full_name || 'Your name'}</h3><p>@{profile?.username || 'username'}</p><button className="subtle-button" type="button" disabled={avatarBusy} onClick={() => avatarInput.current?.click()}>{avatarBusy ? 'Checking and uploading…' : 'Change photo'}</button><small className="profile-photo-guidance">Square JPG, PNG, or WebP · 640–1080 px</small></div>
+              <input ref={avatarInput} hidden type="file" accept="image/jpeg,image/png,image/webp" onChange={(event) => { uploadAvatar(event.target.files?.[0]); event.target.value = '' }} />
             </div>
             <form className="settings-form profile-edit-form" onSubmit={saveProfile}>
               <label>Full name<input required value={profileForm.full_name} maxLength="80" onChange={(event) => setProfileForm({ ...profileForm, full_name: event.target.value })} /></label>
