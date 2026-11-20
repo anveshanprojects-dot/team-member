@@ -470,7 +470,7 @@ html[data-theme=dark] .welcome-tip { border-color: #283a34; }
 .profile-view { width: min(100%, 530px); padding: 24px 28px; }
 .profile-identity { display: flex; align-items: center; gap: 16px; padding: 21px 0; margin: 4px 0 19px; border-bottom: 1px solid var(--line); }
 .profile-identity > div { display: grid; justify-items: start; gap: 4px; }
-.settings-avatar-frame { width: 88px; height: 88px; flex: 0 0 88px; padding: 4px; overflow: hidden; border: 1px solid var(--line); border-radius: 20px; background: var(--soft); box-shadow: 0 3px 10px rgba(0, 31, 63, .1); }
+.settings-avatar-frame { width: 96px; height: 96px; flex: 0 0 96px; display: grid; place-items: center; gap: 0; padding: 4px; overflow: hidden; border: 1px solid var(--line); border-radius: 20px; background: var(--soft); box-shadow: 0 3px 10px rgba(0, 31, 63, .1); }
 .settings-avatar-frame .avatar { width: 100%; height: 100%; overflow: hidden; border-radius: 14px; }
 .profile-photo-guidance { color: var(--muted); font-size: 9px; line-height: 1.4; }
 .profile-identity h3 { margin: 0; color: var(--ink); font: 700 15px Manrope, sans-serif; }
