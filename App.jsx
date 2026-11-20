@@ -1488,7 +1488,7 @@ function App() {
       <button className={`conversation-row ${selected ? 'conversation-selected' : ''}`} onClick={() => { setActiveId(conversation.id); setShowMobileMenu(false) }}>
         {conversation.is_group
           ? <GroupAvatar conversation={conversation} />
-          : <Avatar profile={person} online={person?.is_online} size="large" />}
+          : <Avatar profile={person} online={person?.is_online} size="large" className="recent-chat-avatar" />}
         <span className="conversation-copy">
           <span className="conversation-title">{conversation.is_group ? conversation.name : person?.full_name || person?.username || 'Unknown user'}</span>
           <span className="conversation-preview">{conversation.last_message?.sender_id === session.user.id ? 'You: ' : ''}{conversation.last_message?.content || (conversation.is_group ? 'Group conversation' : 'Say hello 👋')}</span>
