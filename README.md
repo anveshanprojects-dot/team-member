@@ -8,7 +8,7 @@ A responsive real-time messaging application built with React, Vite, Supabase Au
 - Google sign-in through Supabase OAuth when the Google provider is enabled and configured in the Supabase project.
 - Unique usernames and generated Anveshan IDs; search for users from the workspace search bar, subject to account privacy.
 - Search results include a profile preview populated only from the privacy-aware `search_profiles` RPC.
-- Profile editing and profile photos in Settings, plus privacy controls and light/dark appearance.
+- Profile photos can be repositioned and zoomed in a circular crop before upload; profile and group avatar images are saved as square 640×640 to 1080×1080 JPG, PNG, or WebP files.
 - Settings opens in a separate browser tab as a full-page view, with a back-to-chat control.
 - Direct messages can start with any discoverable user. Friend requests can be sent, accepted, and rejected from search results and person details; accepted requests create contacts for both users.
 - Friends can be unfriended from People, search results, and person details. Chats can be removed from your inbox without deleting the other participant’s history; leaving a group removes you from that group.
