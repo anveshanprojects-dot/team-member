@@ -1,10 +1,12 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   ArrowLeft, ArrowUpRight, Bell, Check, CheckCheck,
-  CircleHelp, Copy, File, FileText, Image, ImagePlus, Info, LogOut, Menu, MessageCircle, MoreHorizontal, Pin,
-  Mic, Paperclip, Plus, RefreshCw, Search, Send, Settings, Smile, Square, Trash2, UserRound, Users, X,
+  Camera, CameraOff, CircleHelp, Copy, File, FileText, Image, ImagePlus, Info, LogOut, Maximize, Menu, MessageCircle,
+  Mic, MicOff, Minimize, MoreHorizontal, Phone, PhoneOff, Pin, PictureInPicture, Paperclip, Plus, RefreshCw, Search,
+  Send, Settings, Smile, Square, Trash2, UserRound, Users, Video, Volume2, VolumeX, X,
 } from 'lucide-react'
 import { createClient } from '@supabase/supabase-js'
+import { useCalling } from './useCalling.js'
 
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL
 const supabaseKey = import.meta.env.VITE_SUPABASE_ANON_KEY
@@ -514,6 +516,36 @@ function App() {
     setToast(text)
     window.setTimeout(() => setToast(''), 3500)
   }, [])
+  const calling = useCalling(session, profile, notify, blockedUsers)
+
+  function getPersonPresence(person) {
+    if (person?.show_online_status === false) return 'offline'
+    if (calling.connectionStatus === 'connected') return calling.presence[person?.id] || 'offline'
+    return person?.is_online ? 'online' : 'offline'
+  }
+
+  function getPersonPresenceLabel(person) {
+    const status = getPersonPresence(person)
+    if (status === 'in_call') return 'In a call'
+    if (status === 'busy') return 'Busy'
+    if (status === 'online') return 'Online'
+    if (person?.show_last_seen === false) return 'Offline'
+    return person?.last_seen_at ? `Seen ${formatTime(person.last_seen_at)}` : 'Offline'
+  }
+
+  function renderCallButtons(person, className = '') {
+    const available = calling.canCall(person?.id)
+    const status = getPersonPresenceLabel(person)
+    return <span className={`call-quick-actions ${className}`.trim()}>
+      <button type="button" className="call-quick-button" disabled={!available} title={`Audio call · ${status}`} aria-label={`Audio call ${person?.full_name || person?.username || 'member'} · ${status}`} onClick={() => { void calling.startCall(person, 'audio') }}><Phone size={15} /></button>
+      <button type="button" className="call-quick-button" disabled={!available} title={`Video call · ${status}`} aria-label={`Video call ${person?.full_name || person?.username || 'member'} · ${status}`} onClick={() => { void calling.startCall(person, 'video') }}><Video size={15} /></button>
+    </span>
+  }
+
+  async function toggleBusyPresence() {
+    const result = await calling.setBusy(!calling.manualBusy)
+    if (!result?.ok) notify(result?.error || 'Could not update your availability.')
+  }
 
   function openSettingsPage() {
     const settingsUrl = new URL(import.meta.env.BASE_URL, window.location.origin)
@@ -1804,7 +1836,8 @@ function App() {
             <section className="people-contact-section">
               <h3 className="people-section-heading">People</h3>
               {friends.length ? friends.map((person) => <div className="contact-row" key={person.id}>
-                <button className="contact-open" onClick={() => openDirect(person)}><Avatar profile={person} online={person.is_online} /><span className="contact-copy"><strong>{person.full_name}</strong><small>@{person.username}</small></span><MessageCircle size={17} /></button>
+                <button className="contact-open" onClick={() => openDirect(person)}><Avatar profile={person} online={getPersonPresence(person) === 'online'} /><span className="contact-copy"><strong>{person.full_name}</strong><small>@{person.username} · {getPersonPresenceLabel(person)}</small></span><MessageCircle size={17} /></button>
+                {renderCallButtons(person, 'contact-call-actions')}
                 <button className="contact-remove" aria-label={`Unfriend ${person.full_name}`} title={`Unfriend ${person.full_name}`} onClick={() => removeFriend(person)}><X size={14} /><span>Unfriend</span></button>
               </div>) : <div className="empty-sidebar"><div className="empty-icon"><Users size={20} /></div><strong>Your circle starts here</strong><span>Find people by username or Anveshan ID.</span><button className="text-button" onClick={() => setTab('search')}>Find someone <ArrowUpRight size={14} /></button></div>}
             </section>
@@ -1816,9 +1849,10 @@ function App() {
               (item.sender_id === person.id && item.receiver_id === session.user.id)
             )
             return <div className="search-result" key={person.id}>
-              <Avatar profile={person} online={person.is_online} />
-              <span className="contact-copy"><strong>{person.full_name}</strong><small>@{person.username} · {person.user_id} · {person.is_online ? 'Online' : person.last_seen_at ? `Seen ${formatTime(person.last_seen_at)}` : 'Offline'}</small></span>
+              <Avatar profile={person} online={getPersonPresence(person) === 'online'} />
+              <span className="contact-copy"><strong>{person.full_name}</strong><small>@{person.username} · {person.user_id} · {getPersonPresenceLabel(person)}</small></span>
               <div className="result-actions">
+                {renderCallButtons(person)}
                 <button className="subtle-button profile-view-button" onClick={() => setProfilePreview(person)}>View profile</button>
                 <FriendshipActions
                   className="search-friendship-actions"
@@ -1837,7 +1871,13 @@ function App() {
           })}{!searching && userSearch && !searchResults.length && <div className="empty-sidebar"><strong>No one found</strong><span>Check the spelling or try their exact username or ID.</span></div>}<div className="search-hint"><Info size={14} />Search exact usernames or unique Anveshan IDs.</div></>}
           {tab === 'notifications' && (notifications.length ? notifications.map((notification) => <div className="activity-row" key={notification.id}><span className="activity-icon"><Bell size={15} /></span><span><strong>{notification.title || 'Anveshan Chat update'}</strong><small>{notification.body || notification.type}</small><small>{formatTime(notification.created_at)}</small></span><button className="icon-button notification-delete-button" onClick={() => deleteNotification(notification.id)} title="Delete notification" aria-label={`Delete notification: ${notification.title || notification.type}`}><Trash2 size={15} /></button></div>) : <div className="empty-sidebar"><div className="empty-icon"><Bell size={20} /></div><strong>Nothing new</strong><span>Your latest activity will appear here.</span></div>)}
         </div>
-        <footer className="sidebar-footer"><div className={`footer-status connection-${connectionStatus}`} role="status" aria-live="polite"><i />{connectionStatus === 'connected' ? 'Connected' : connectionStatus === 'disconnected' ? 'Reconnecting…' : 'Connecting…'}</div><button className="footer-help" onClick={() => notify('Tip: search for a username or Anveshan ID to find friends.')}><CircleHelp size={15} /> Help & tips</button></footer>
+        <footer className="sidebar-footer">
+          <div className={`footer-status connection-${connectionStatus}`} role="status" aria-live="polite"><i />{connectionStatus === 'connected' ? 'Connected' : connectionStatus === 'disconnected' ? 'Reconnecting…' : 'Connecting…'}</div>
+          <button type="button" className={`presence-toggle ${calling.manualBusy ? 'presence-busy' : ''}`} onClick={() => { void toggleBusyPresence() }} disabled={calling.connectionStatus !== 'connected' || Boolean(calling.call)} title="Set your calling availability">
+            <i />{calling.presence[session.user.id] === 'in_call' ? 'In a call' : calling.manualBusy ? 'Busy' : 'Available'}
+          </button>
+          <button className="footer-help" onClick={() => notify('Tip: search for a username or Anveshan ID to find friends.')}><CircleHelp size={15} /> Help & tips</button>
+        </footer>
       </aside>
 
       <section className={`chat-area ${activeConversation ? 'chat-area-active' : ''}`}>
@@ -1845,8 +1885,14 @@ function App() {
           <header className="chat-header">
             <button className="icon-button back-button" onClick={() => setActiveId(null)} aria-label="Back to conversations"><ArrowLeft size={19} /></button>
             {activeConversation.is_group ? <GroupAvatar conversation={activeConversation} size="head" /> : <Avatar profile={activeMember} online={activeMember?.is_online} />}
-            <button className="chat-person" onClick={() => setShowInfo(!showInfo)}><strong>{activeTitle}</strong><small>{activeConversation.is_group ? `${activeConversation.members?.length || 0} members` : activeMember?.is_online ? 'Online now' : activeStatus?.last_seen_at ? `Last seen ${formatTime(activeStatus.last_seen_at)}` : 'Offline'}</small></button>
-            <div className="chat-header-actions"><button className="icon-button" title="Search all messages in this conversation" aria-label="Search messages" onClick={searchConversation}><Search size={18} /></button><button className="icon-button" onClick={() => setShowInfo(!showInfo)} title="Conversation details"><MoreHorizontal size={19} /></button></div>
+            <button className="chat-person" onClick={() => setShowInfo(!showInfo)}><strong>{activeTitle}</strong><small>{activeConversation.is_group ? `${activeConversation.members?.length || 0} members` : getPersonPresence(activeMember) === 'online' ? 'Online now' : getPersonPresence(activeMember) === 'busy' ? 'Busy' : getPersonPresence(activeMember) === 'in_call' ? 'In a call' : activeStatus?.last_seen_at ? `Last seen ${formatTime(activeStatus.last_seen_at)}` : 'Offline'}</small></button>
+            <div className="chat-header-actions">
+              {!activeConversation.is_group && activeMember && <>
+                <button type="button" className="icon-button call-header-button" disabled={!calling.canCall(activeMember.id)} title={`Audio call · ${getPersonPresenceLabel(activeMember)}`} aria-label={`Audio call ${activeTitle}`} onClick={() => { void calling.startCall(activeMember, 'audio') }}><Phone size={17} /></button>
+                <button type="button" className="icon-button call-header-button" disabled={!calling.canCall(activeMember.id)} title={`Video call · ${getPersonPresenceLabel(activeMember)}`} aria-label={`Video call ${activeTitle}`} onClick={() => { void calling.startCall(activeMember, 'video') }}><Video size={17} /></button>
+              </>}
+              <button className="icon-button" title="Search all messages in this conversation" aria-label="Search messages" onClick={searchConversation}><Search size={18} /></button><button className="icon-button" onClick={() => setShowInfo(!showInfo)} title="Conversation details"><MoreHorizontal size={19} /></button>
+            </div>
           </header>
           <div className="chat-canvas" ref={chatCanvasRef} onTouchStart={handlePullTouchStart} onTouchMove={handlePullTouchMove} onTouchEnd={handlePullTouchEnd} onTouchCancel={cancelPullGesture}>
             {renderPullRefreshIndicator()}
@@ -1950,7 +1996,7 @@ function App() {
       {showInfo && activeConversation && <aside className="info-panel">
         <header><strong>Details</strong><button className="icon-button" onClick={() => setShowInfo(false)}><X size={18} /></button></header>
         <div className="info-person">
-          {activeConversation.is_group ? <GroupAvatar conversation={activeConversation} size="xl" /> : <Avatar profile={activeMember} size="xl" online={activeMember?.is_online} />}
+          {activeConversation.is_group ? <GroupAvatar conversation={activeConversation} size="xl" /> : <Avatar profile={activeMember} size="xl" online={getPersonPresence(activeMember) === 'online'} />}
           <strong>{activeTitle}</strong>
           <span>{activeConversation.is_group ? `Group · ${activeConversation.members?.length || 0} members` : `@${activeMember?.username}`}</span>
           {activeConversation.is_group && activeConversation.members.some((member) => member.id === session.user.id && member.role === 'admin') && <>
@@ -1959,7 +2005,8 @@ function App() {
           </>}
           {!activeConversation.is_group && activeMember?.user_id && <>
             <small>Anveshan ID · {activeMember.user_id}</small>
-            <small>{activeMember.is_online ? 'Online now' : activeStatus?.last_seen_at ? `Last seen ${formatTime(activeStatus.last_seen_at)}` : 'Offline'}</small>
+            <small>{getPersonPresenceLabel(activeMember)}</small>
+            <div className="info-call-actions">{renderCallButtons(activeMember, 'info-call-buttons')}</div>
           </>}
         </div>
         {activeConversation.is_group && <div className="info-members">
@@ -2004,7 +2051,7 @@ function App() {
           </div>}
       </aside>}
       {profilePreview && <PublicProfileModal
-        profile={profilePreview}
+        profile={{ ...profilePreview, is_online: getPersonPresence(profilePreview) === 'online', presence_status: getPersonPresenceLabel(profilePreview) }}
         isFriend={profilePreviewIsFriend}
         request={profilePreviewRequest}
         currentUserId={session.user.id}
@@ -2014,6 +2061,8 @@ function App() {
         onUnfriend={removeFriend}
         onClose={() => setProfilePreview(null)}
         onMessage={(person) => { setProfilePreview(null); openDirect(person) }}
+        onCall={(person, type) => { void calling.startCall(person, type) }}
+        canCall={calling.canCall(profilePreview.id)}
       />}
       {showGroup && <GroupModal friends={friends} onClose={() => setShowGroup(false)} onCreate={createGroup} busy={busy} />}
       {groupAvatarCropFile && <AvatarCropModal
@@ -2021,6 +2070,22 @@ function App() {
         title="Adjust group photo"
         onCancel={() => setGroupAvatarCropFile(null)}
         onCrop={(croppedFile) => { setGroupAvatarCropFile(null); void uploadGroupAvatar(croppedFile) }}
+      />}
+      {calling.call && <CallOverlay
+        call={calling.call}
+        localStream={calling.localStream}
+        remoteStream={calling.remoteStream}
+        microphoneMuted={calling.microphoneMuted}
+        cameraEnabled={calling.cameraEnabled}
+        speakerEnabled={calling.speakerEnabled}
+        onAccept={calling.acceptCall}
+        onReject={calling.rejectCall}
+        onCancel={calling.cancelCall}
+        onEnd={calling.endCall}
+        onToggleMicrophone={calling.toggleMicrophone}
+        onToggleCamera={calling.toggleCamera}
+        onToggleSpeaker={calling.toggleSpeaker}
+        notify={notify}
       />}
       {toast && <div className="toast"><span className="toast-check"><Check size={14} /></span>{toast}</div>}
       <nav className="mobile-bottom-nav" aria-label="Mobile navigation">
@@ -2033,12 +2098,189 @@ function App() {
   )
 }
 
-function PublicProfileModal({ profile, isFriend, request, currentUserId, busy, onSend, onRespond, onUnfriend, onClose, onMessage }) {
-  const status = profile.is_online
+function CallOverlay({
+  call, localStream, remoteStream, microphoneMuted, cameraEnabled, speakerEnabled,
+  onAccept, onReject, onCancel, onEnd, onToggleMicrophone, onToggleCamera, onToggleSpeaker, notify,
+}) {
+  const overlayRef = useRef(null)
+  const localVideoRef = useRef(null)
+  const remoteVideoRef = useRef(null)
+  const remoteAudioRef = useRef(null)
+  const playbackErrorRef = useRef(false)
+  const [duration, setDuration] = useState(0)
+  const [fullscreen, setFullscreen] = useState(false)
+  const incoming = call.phase === 'incoming'
+  const outgoing = call.phase === 'outgoing'
+  const videoCall = call.type === 'video'
+  const remoteHasVideo = Boolean(remoteStream?.getVideoTracks().some((track) => track.readyState === 'live'))
+
+  useEffect(() => {
+    if (!incoming) return undefined
+    const AudioContextConstructor = window.AudioContext || window.webkitAudioContext
+    if (!AudioContextConstructor) return undefined
+    let context
+    let interval
+    let cancelled = false
+    const playTone = () => {
+      if (!context || context.state !== 'running') return
+      const oscillator = context.createOscillator()
+      const gain = context.createGain()
+      const now = context.currentTime
+      oscillator.type = 'sine'
+      oscillator.frequency.setValueAtTime(440, now)
+      gain.gain.setValueAtTime(0.0001, now)
+      gain.gain.exponentialRampToValueAtTime(0.055, now + 0.04)
+      gain.gain.setTargetAtTime(0.0001, now + 0.55, 0.08)
+      oscillator.connect(gain)
+      gain.connect(context.destination)
+      oscillator.start(now)
+      oscillator.stop(now + 0.8)
+    }
+    try {
+      context = new AudioContextConstructor()
+      context.resume().then(() => {
+        if (cancelled) return
+        playTone()
+        interval = window.setInterval(playTone, 1_800)
+      }).catch(() => notify('Your browser blocked the incoming-call ringtone. The call popup is still active.'))
+    } catch (error) {
+      notify(`Could not play the incoming-call ringtone: ${error.message}`)
+    }
+    return () => {
+      cancelled = true
+      window.clearInterval(interval)
+      if (context && context.state !== 'closed') void context.close()
+    }
+  }, [incoming, notify])
+
+  useEffect(() => {
+    playbackErrorRef.current = false
+  }, [call.callId])
+
+  useEffect(() => {
+    if (!call.connectedAt || call.phase !== 'active') {
+      setDuration(0)
+      return undefined
+    }
+    const updateDuration = () => setDuration(Math.max(0, Math.floor((Date.now() - call.connectedAt) / 1_000)))
+    updateDuration()
+    const interval = window.setInterval(updateDuration, 1_000)
+    return () => window.clearInterval(interval)
+  }, [call.connectedAt, call.phase])
+
+  useEffect(() => {
+    if (localVideoRef.current) localVideoRef.current.srcObject = localStream || null
+    if (remoteVideoRef.current) {
+      remoteVideoRef.current.srcObject = remoteStream || null
+      remoteVideoRef.current.muted = !speakerEnabled
+      if (remoteStream) void remoteVideoRef.current.play().catch((error) => {
+        if (playbackErrorRef.current) return
+        playbackErrorRef.current = true
+        notify(`Could not play remote video audio: ${error.message}`)
+      })
+    }
+    if (remoteAudioRef.current) {
+      remoteAudioRef.current.srcObject = remoteStream || null
+      remoteAudioRef.current.volume = speakerEnabled ? 1 : 0
+      if (remoteStream) void remoteAudioRef.current.play().catch((error) => {
+        if (playbackErrorRef.current) return
+        playbackErrorRef.current = true
+        notify(`Could not play remote audio: ${error.message}`)
+      })
+    }
+  }, [localStream, remoteStream, speakerEnabled, videoCall, notify])
+
+  useEffect(() => {
+    const updateFullscreen = () => setFullscreen(document.fullscreenElement === overlayRef.current)
+    document.addEventListener('fullscreenchange', updateFullscreen)
+    return () => document.removeEventListener('fullscreenchange', updateFullscreen)
+  }, [])
+
+  async function toggleFullscreen() {
+    try {
+      if (document.fullscreenElement) await document.exitFullscreen()
+      else await overlayRef.current?.requestFullscreen?.()
+    } catch (error) {
+      notify(`Could not change fullscreen mode: ${error.message}`)
+    }
+  }
+
+  async function togglePictureInPicture() {
+    try {
+      if (document.pictureInPictureElement) {
+        await document.exitPictureInPicture()
+        return
+      }
+      const video = remoteVideoRef.current?.readyState >= 2 ? remoteVideoRef.current : localVideoRef.current
+      if (!video?.requestPictureInPicture) {
+        notify('Picture-in-picture is not supported by this browser.')
+        return
+      }
+      await video.requestPictureInPicture()
+    } catch (error) {
+      notify(`Could not start picture-in-picture: ${error.message}`)
+    }
+  }
+
+  const statusText = incoming
+    ? `Incoming ${videoCall ? 'video' : 'audio'} call`
+    : outgoing
+      ? `Calling ${call.peerName}…`
+      : call.phase === 'active'
+        ? formatDuration(duration)
+        : call.connectionState === 'failed'
+          ? 'Connection failed'
+          : 'Connecting…'
+
+  return (
+    <div className="call-overlay-backdrop">
+      {incoming ? <section className="incoming-call-card" role="dialog" aria-modal="true" aria-labelledby="incoming-call-title">
+        <div className="incoming-call-rings"><Avatar profile={{ full_name: call.peerName, avatar_url: call.peerAvatar }} size="xl" /></div>
+        <span className="call-eyebrow">ANVESHAN CHAT</span>
+        <h2 id="incoming-call-title">{call.peerName}</h2>
+        <p>{statusText}</p>
+        <div className="incoming-call-actions">
+          <button type="button" className="call-action reject-call" onClick={() => { void onReject() }} aria-label="Reject call"><PhoneOff size={20} /><span>Decline</span></button>
+          <button type="button" className="call-action accept-call" onClick={() => { void onAccept() }} aria-label="Accept call"><Phone size={20} /><span>Accept</span></button>
+        </div>
+      </section> : <section className={`active-call-panel ${videoCall ? 'active-video-call' : 'active-audio-call'}`} ref={overlayRef} role="dialog" aria-modal="true" aria-label={`${videoCall ? 'Video' : 'Audio'} call with ${call.peerName}`}>
+        <header className="active-call-header">
+          <div className="active-call-identity"><Avatar profile={{ full_name: call.peerName, avatar_url: call.peerAvatar }} size="small" /><span><strong>{call.peerName}</strong><small>{statusText}</small></span></div>
+          {videoCall && <div className="call-window-actions">
+            {document.pictureInPictureEnabled && <button type="button" className="call-control-button" title="Picture in picture" aria-label="Picture in picture" onClick={() => { void togglePictureInPicture() }}><PictureInPicture size={18} /></button>}
+            <button type="button" className="call-control-button" title={fullscreen ? 'Exit fullscreen' : 'Fullscreen'} aria-label={fullscreen ? 'Exit fullscreen' : 'Fullscreen'} onClick={() => { void toggleFullscreen() }}>{fullscreen ? <Minimize size={18} /> : <Maximize size={18} />}</button>
+          </div>}
+        </header>
+        <div className={`call-stage ${remoteHasVideo ? 'call-stage-video' : ''}`}>
+          {videoCall ? <>
+            <div className="remote-video-stage">
+              <video ref={remoteVideoRef} autoPlay playsInline aria-label={`${call.peerName}'s video`} style={{ display: remoteHasVideo ? 'block' : 'none' }} />
+              {!remoteHasVideo && <div className="call-peer-avatar"><Avatar profile={{ full_name: call.peerName, avatar_url: call.peerAvatar }} size="xl" /><strong>{call.peerName}</strong><span>{statusText}</span></div>}
+            </div>
+            <video ref={localVideoRef} className={`local-video-preview ${cameraEnabled ? '' : 'local-video-off'}`} autoPlay playsInline muted aria-label="Your camera preview" />
+          </> : <>
+            <audio ref={remoteAudioRef} autoPlay />
+            <div className="call-peer-avatar audio-call-avatar"><Avatar profile={{ full_name: call.peerName, avatar_url: call.peerAvatar }} size="xl" /><strong>{call.peerName}</strong><span>{statusText}</span></div>
+            <div className="audio-call-wave" aria-hidden="true"><i /><i /><i /><i /><i /><i /><i /></div>
+          </>}
+        </div>
+        <footer className="active-call-controls">
+          <button type="button" className={`call-control-button ${microphoneMuted ? 'call-control-muted' : ''}`} onClick={onToggleMicrophone} title={microphoneMuted ? 'Turn microphone on' : 'Mute microphone'} aria-label={microphoneMuted ? 'Turn microphone on' : 'Mute microphone'}><span>{microphoneMuted ? <MicOff size={19} /> : <Mic size={19} />}</span><small>{microphoneMuted ? 'Unmute' : 'Mute'}</small></button>
+          {videoCall && <button type="button" className={`call-control-button ${!cameraEnabled ? 'call-control-muted' : ''}`} onClick={onToggleCamera} title={cameraEnabled ? 'Turn camera off' : 'Turn camera on'} aria-label={cameraEnabled ? 'Turn camera off' : 'Turn camera on'}><span>{cameraEnabled ? <Camera size={19} /> : <CameraOff size={19} />}</span><small>{cameraEnabled ? 'Camera' : 'Camera off'}</small></button>}
+          <button type="button" className={`call-control-button ${!speakerEnabled ? 'call-control-muted' : ''}`} onClick={onToggleSpeaker} title={speakerEnabled ? 'Mute speaker' : 'Unmute speaker'} aria-label={speakerEnabled ? 'Mute speaker' : 'Unmute speaker'}><span>{speakerEnabled ? <Volume2 size={19} /> : <VolumeX size={19} />}</span><small>Speaker</small></button>
+          <button type="button" className="call-control-button end-call-button" onClick={() => { void (outgoing ? onCancel() : onEnd()) }} title={outgoing ? 'Cancel call' : 'End call'} aria-label={outgoing ? 'Cancel call' : 'End call'}><span>{outgoing ? <PhoneOff size={19} /> : <Phone size={19} />}</span><small>{outgoing ? 'Cancel' : 'End'}</small></button>
+        </footer>
+      </section>}
+    </div>
+  )
+}
+
+function PublicProfileModal({ profile, isFriend, request, currentUserId, busy, onSend, onRespond, onUnfriend, onClose, onMessage, onCall, canCall }) {
+  const status = profile.presence_status || (profile.is_online
     ? 'Online now'
     : profile.last_seen_at
       ? `Last seen ${formatTime(profile.last_seen_at)}`
-      : 'Offline'
+      : 'Offline')
 
   return (
     <div className="modal-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose() }}>
@@ -2068,6 +2310,10 @@ function PublicProfileModal({ profile, isFriend, request, currentUserId, busy, o
           onRespond={onRespond}
           onUnfriend={onUnfriend}
         />
+        <div className="profile-call-actions">
+          <button type="button" className="subtle-button" disabled={!canCall} onClick={() => onCall(profile, 'audio')}><Phone size={15} />Audio call</button>
+          <button type="button" className="subtle-button" disabled={!canCall} onClick={() => onCall(profile, 'video')}><Video size={15} />Video call</button>
+        </div>
         <footer className="modal-actions">
           <button className="subtle-button" onClick={onClose}>Close</button>
           <button className="primary-button" onClick={() => onMessage(profile)}><MessageCircle size={16} />Message</button>
