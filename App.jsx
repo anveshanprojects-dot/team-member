@@ -12,6 +12,9 @@ const supabase = supabaseUrl && supabaseKey ? createClient(supabaseUrl, supabase
 const EMOJIS = ['😀', '😂', '🥰', '😍', '😊', '😎', '🥳', '😭', '👍', '❤️', '🔥', '🎉', '🙏', '✨', '👋', '🤔']
 const GROUP_IMAGE_EXTENSIONS = { 'image/jpeg': 'jpg', 'image/png': 'png', 'image/webp': 'webp' }
 const MESSAGE_PAGE_SIZE = 50
+const AVATAR_MIN_SIZE = 640
+const AVATAR_MAX_SIZE = 1080
+const CROP_VIEW_SIZE = 280
 
 function getImageDimensions(file) {
   return new Promise((resolve, reject) => {
@@ -27,6 +30,33 @@ function getImageDimensions(file) {
     }
     image.src = imageUrl
   })
+}
+
+function validateAvatarImage(file, notify) {
+  if (!GROUP_IMAGE_EXTENSIONS[file.type] || file.size > 5 * 1024 * 1024) {
+    notify('Choose a JPG, PNG, or WebP image smaller than 5 MB.')
+    return false
+  }
+  return true
+}
+
+function getAvatarCropLayout(image, zoom, pan, size) {
+  const scale = Math.max(size / image.naturalWidth, size / image.naturalHeight) * zoom
+  const width = image.naturalWidth * scale
+  const height = image.naturalHeight * scale
+  const maxX = Math.max(0, (width - size) / 2)
+  const maxY = Math.max(0, (height - size) / 2)
+  const offsetX = Math.min(maxX, Math.max(-maxX, pan.x))
+  const offsetY = Math.min(maxY, Math.max(-maxY, pan.y))
+  return {
+    scale,
+    width,
+    height,
+    maxX,
+    maxY,
+    left: (size - width) / 2 + offsetX,
+    top: (size - height) / 2 + offsetY,
+  }
 }
 
 async function addSignedAttachmentUrls(rows, onError) {
@@ -63,6 +93,151 @@ function Avatar({ profile, size = 'normal', online = false, className = '' }) {
       {online && <i className="online-dot" />}
     </span>
   )
+}
+
+function AvatarCropModal({ file, title, onCancel, onCrop }) {
+  const [image, setImage] = useState(null)
+  const [loadError, setLoadError] = useState('')
+  const [cropError, setCropError] = useState('')
+  const [zoom, setZoom] = useState(1)
+  const [pan, setPan] = useState({ x: 0, y: 0 })
+  const [cropping, setCropping] = useState(false)
+  const canvasRef = useRef(null)
+  const dragRef = useRef(null)
+
+  useEffect(() => {
+    setImage(null)
+    setLoadError('')
+    setCropError('')
+    setZoom(1)
+    setPan({ x: 0, y: 0 })
+    const imageUrl = URL.createObjectURL(file)
+    const source = new window.Image()
+    source.onload = () => setImage(source)
+    source.onerror = () => setLoadError('Could not read this image. Choose a valid JPG, PNG, or WebP file.')
+    source.src = imageUrl
+    return () => {
+      source.onload = null
+      source.onerror = null
+      URL.revokeObjectURL(imageUrl)
+    }
+  }, [file])
+
+  const sourceSize = image ? Math.min(image.naturalWidth, image.naturalHeight) : 0
+  const maxZoom = image ? Math.min(3, sourceSize / AVATAR_MIN_SIZE) : 1
+  const imageIsLargeEnough = sourceSize >= AVATAR_MIN_SIZE
+
+  const drawPreview = useCallback(() => {
+    const canvas = canvasRef.current
+    if (!canvas || !image) return
+    const size = canvas.getBoundingClientRect().width || CROP_VIEW_SIZE
+    const pixelRatio = Math.min(window.devicePixelRatio || 1, 2)
+    canvas.width = Math.round(size * pixelRatio)
+    canvas.height = Math.round(size * pixelRatio)
+    const context = canvas.getContext('2d')
+    if (!context) {
+      setCropError('Could not prepare the photo preview in this browser.')
+      return
+    }
+    context.setTransform(pixelRatio, 0, 0, pixelRatio, 0, 0)
+    context.clearRect(0, 0, size, size)
+    const layout = getAvatarCropLayout(image, zoom, pan, size)
+    context.drawImage(image, layout.left, layout.top, layout.width, layout.height)
+  }, [image, pan, zoom])
+
+  useEffect(() => {
+    drawPreview()
+    window.addEventListener('resize', drawPreview)
+    return () => window.removeEventListener('resize', drawPreview)
+  }, [drawPreview])
+
+  function startDragging(event) {
+    if (!image) return
+    event.preventDefault()
+    event.currentTarget.setPointerCapture(event.pointerId)
+    dragRef.current = {
+      pointerId: event.pointerId,
+      startX: event.clientX,
+      startY: event.clientY,
+      panX: pan.x,
+      panY: pan.y,
+    }
+  }
+
+  function dragImage(event) {
+    const drag = dragRef.current
+    if (!image || !drag || drag.pointerId !== event.pointerId) return
+    const size = canvasRef.current?.getBoundingClientRect().width || CROP_VIEW_SIZE
+    const layout = getAvatarCropLayout(image, zoom, { x: 0, y: 0 }, size)
+    setPan({
+      x: Math.min(layout.maxX, Math.max(-layout.maxX, drag.panX + event.clientX - drag.startX)),
+      y: Math.min(layout.maxY, Math.max(-layout.maxY, drag.panY + event.clientY - drag.startY)),
+    })
+  }
+
+  async function applyCrop() {
+    if (!image || !imageIsLargeEnough || cropping) return
+    setCropping(true)
+    setCropError('')
+    try {
+      const size = canvasRef.current?.getBoundingClientRect().width || CROP_VIEW_SIZE
+      const layout = getAvatarCropLayout(image, zoom, pan, size)
+      const sourceCropSize = size / layout.scale
+      const outputSize = Math.min(AVATAR_MAX_SIZE, Math.floor(sourceCropSize + 0.01))
+      if (outputSize < AVATAR_MIN_SIZE) throw new Error('Zoom out or choose a larger image to keep the crop at least 640 × 640 pixels.')
+      const sourceX = Math.min(image.naturalWidth - sourceCropSize, Math.max(0, -layout.left / layout.scale))
+      const sourceY = Math.min(image.naturalHeight - sourceCropSize, Math.max(0, -layout.top / layout.scale))
+      const output = document.createElement('canvas')
+      output.width = outputSize
+      output.height = outputSize
+      const context = output.getContext('2d')
+      if (!context) throw new Error('Could not crop the photo in this browser.')
+      context.drawImage(image, sourceX, sourceY, sourceCropSize, sourceCropSize, 0, 0, outputSize, outputSize)
+      const blob = await new Promise((resolve) => output.toBlob(resolve, 'image/webp', 0.92))
+      if (!blob) throw new Error('Could not create the cropped photo.')
+      if (blob.size > 5 * 1024 * 1024) throw new Error('The cropped photo must be smaller than 5 MB.')
+      const extension = blob.type === 'image/webp' ? 'webp' : blob.type === 'image/jpeg' ? 'jpg' : 'png'
+      onCrop(new File([blob], `avatar-${Date.now()}.${extension}`, { type: blob.type }))
+    } catch (error) {
+      setCropError(error.message || 'Could not crop this photo.')
+    } finally {
+      setCropping(false)
+    }
+  }
+
+  return <div className="modal-backdrop image-crop-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) onCancel() }}>
+    <section className="image-crop-modal" role="dialog" aria-modal="true" aria-labelledby="image-crop-title">
+      <header className="modal-header">
+        <div><span className="eyebrow">PHOTO ADJUSTMENT</span><h2 id="image-crop-title">{title}</h2></div>
+        <button type="button" className="icon-button" onClick={onCancel} aria-label="Cancel photo adjustment"><X size={18} /></button>
+      </header>
+      <p className="image-crop-instructions">Drag the photo inside the circle, then adjust the zoom.</p>
+      <div className="image-crop-preview">
+        {image
+          ? <canvas
+            ref={canvasRef}
+            className="image-crop-canvas"
+            aria-label="Circular photo crop preview. Drag to reposition."
+            onPointerDown={startDragging}
+            onPointerMove={dragImage}
+            onPointerUp={() => { dragRef.current = null }}
+            onPointerCancel={() => { dragRef.current = null }}
+          />
+          : <p role="status">{loadError || 'Loading photo…'}</p>}
+      </div>
+      {image && !imageIsLargeEnough && <p className="image-crop-error" role="alert">Use an image at least 640 pixels on its shortest side.</p>}
+      {image && <label className="image-crop-zoom">
+        <span>Zoom</span>
+        <input type="range" min="1" max={Math.max(1, maxZoom)} step="0.01" value={Math.min(zoom, maxZoom)} disabled={maxZoom <= 1 || !imageIsLargeEnough} onChange={(event) => setZoom(Number(event.target.value))} />
+        <output>{Math.round(zoom * 100)}%</output>
+      </label>}
+      {cropError && <p className="image-crop-error" role="alert">{cropError}</p>}
+      <div className="modal-actions">
+        <button type="button" className="subtle-button" onClick={onCancel} disabled={cropping}>Cancel</button>
+        <button type="button" className="primary-button" onClick={applyCrop} disabled={!image || !imageIsLargeEnough || cropping}>{cropping ? 'Cropping…' : 'Use this photo'}</button>
+      </div>
+    </section>
+  </div>
 }
 
 function GroupAvatar({ conversation, size = 'normal' }) {
@@ -244,6 +419,7 @@ function App() {
   const [friendRequestBusy, setFriendRequestBusy] = useState(null)
   const [groupMemberBusy, setGroupMemberBusy] = useState(null)
   const [groupAvatarBusy, setGroupAvatarBusy] = useState(false)
+  const [groupAvatarCropFile, setGroupAvatarCropFile] = useState(null)
   const [blockedUsers, setBlockedUsers] = useState([])
   const [notifications, setNotifications] = useState([])
   const [tab, setTab] = useState('chats')
@@ -1093,11 +1269,19 @@ function App() {
 
   async function uploadGroupAvatar(file, conversation = activeConversation) {
     if (!file || !conversation?.is_group) return false
-    const extension = GROUP_IMAGE_EXTENSIONS[file.type]
-    if (!extension || file.size > 5 * 1024 * 1024) {
-      notify('Choose a JPG, PNG, or WebP image smaller than 5 MB.')
+    if (!validateAvatarImage(file, notify)) return false
+    let dimensions
+    try {
+      dimensions = await getImageDimensions(file)
+    } catch (error) {
+      notify(error.message)
       return false
     }
+    if (dimensions.width !== dimensions.height || dimensions.width < AVATAR_MIN_SIZE || dimensions.width > AVATAR_MAX_SIZE) {
+      notify('Group photos must be square and between 640 × 640 and 1080 × 1080 pixels.')
+      return false
+    }
+    const extension = GROUP_IMAGE_EXTENSIONS[file.type]
     const isAdmin = conversation.created_by === session.user.id ||
       conversation.members?.some((member) => member.id === session.user.id && member.role === 'admin')
     if (!isAdmin) {
@@ -1129,6 +1313,11 @@ function App() {
     setGroupAvatarBusy(false)
     notify('Group photo updated.')
     return true
+  }
+
+  function chooseGroupAvatar(file) {
+    if (!file || !validateAvatarImage(file, notify)) return
+    setGroupAvatarCropFile(file)
   }
 
   async function removeGroupMember(userId) {
@@ -1765,7 +1954,7 @@ function App() {
           <strong>{activeTitle}</strong>
           <span>{activeConversation.is_group ? `Group · ${activeConversation.members?.length || 0} members` : `@${activeMember?.username}`}</span>
           {activeConversation.is_group && activeConversation.members.some((member) => member.id === session.user.id && member.role === 'admin') && <>
-            <input ref={groupAvatarInputRef} hidden type="file" accept="image/jpeg,image/png,image/webp" onChange={(event) => { uploadGroupAvatar(event.target.files?.[0]); event.target.value = '' }} />
+            <input ref={groupAvatarInputRef} hidden type="file" accept="image/jpeg,image/png,image/webp" onChange={(event) => { chooseGroupAvatar(event.target.files?.[0]); event.target.value = '' }} />
             <button type="button" className="subtle-button group-photo-button" disabled={groupAvatarBusy} onClick={() => groupAvatarInputRef.current?.click()}><ImagePlus size={14} />{groupAvatarBusy ? 'Updating photo…' : activeConversation.avatar_url ? 'Change group photo' : 'Add group photo'}</button>
           </>}
           {!activeConversation.is_group && activeMember?.user_id && <>
@@ -1827,6 +2016,12 @@ function App() {
         onMessage={(person) => { setProfilePreview(null); openDirect(person) }}
       />}
       {showGroup && <GroupModal friends={friends} onClose={() => setShowGroup(false)} onCreate={createGroup} busy={busy} />}
+      {groupAvatarCropFile && <AvatarCropModal
+        file={groupAvatarCropFile}
+        title="Adjust group photo"
+        onCancel={() => setGroupAvatarCropFile(null)}
+        onCrop={(croppedFile) => { setGroupAvatarCropFile(null); void uploadGroupAvatar(croppedFile) }}
+      />}
       {toast && <div className="toast"><span className="toast-check"><Check size={14} /></span>{toast}</div>}
       <nav className="mobile-bottom-nav" aria-label="Mobile navigation">
         <button onClick={() => { setTab('chats'); setActiveId(null); setShowMobileMenu(false) }} className={tab === 'chats' ? 'mobile-nav-selected' : ''}><MessageCircle size={19} /><span>Chats</span>{unreadTotal > 0 && <i className="mobile-nav-badge">{unreadTotal}</i>}</button>
@@ -1962,6 +2157,7 @@ function SettingsModal({ profile, email, blockedUsers, onUnblock, onDeleteAccoun
   const [saving, setSaving] = useState(false)
   const [savingProfile, setSavingProfile] = useState(false)
   const [avatarBusy, setAvatarBusy] = useState(false)
+  const [avatarCropFile, setAvatarCropFile] = useState(null)
   const [changingPassword, setChangingPassword] = useState(false)
   const [password, setPassword] = useState('')
   const avatarInput = useRef(null)
@@ -1996,10 +2192,7 @@ function SettingsModal({ profile, email, blockedUsers, onUnblock, onDeleteAccoun
 
   async function uploadAvatar(file) {
     if (!file || !profile?.id) return
-    if (!GROUP_IMAGE_EXTENSIONS[file.type] || file.size > 5 * 1024 * 1024) {
-      notify('Choose a JPG, PNG, or WebP image smaller than 5 MB.')
-      return
-    }
+    if (!validateAvatarImage(file, notify)) return
     setAvatarBusy(true)
     try {
       const { width, height } = await getImageDimensions(file)
@@ -2021,6 +2214,10 @@ function SettingsModal({ profile, email, blockedUsers, onUnblock, onDeleteAccoun
     } finally {
       setAvatarBusy(false)
     }
+  }
+
+  function chooseAvatar(file) {
+    if (file && validateAvatarImage(file, notify)) setAvatarCropFile(file)
   }
 
   async function updatePassword(event) {
@@ -2051,7 +2248,8 @@ function SettingsModal({ profile, email, blockedUsers, onUnblock, onDeleteAccoun
     account: ['Account', 'Account details and sign-in actions.'],
   }
 
-  return <div className={`modal-backdrop ${standalone ? 'settings-page-backdrop' : ''}`} onMouseDown={(event) => { if (!standalone && event.target === event.currentTarget) onClose() }}>
+  return <>
+    <div className={`modal-backdrop ${standalone ? 'settings-page-backdrop' : ''}`} onMouseDown={(event) => { if (!standalone && event.target === event.currentTarget) onClose() }}>
     <section className="settings-window">
       <header className="settings-topbar">
         <div><span className="settings-app-mark"><Settings size={16} /></span><strong>Settings</strong><span className="settings-divider">/</span><span>{headings[section][0]}</span></div>
@@ -2070,8 +2268,8 @@ function SettingsModal({ profile, email, blockedUsers, onUnblock, onDeleteAccoun
               <div className="settings-avatar-frame" role="img" aria-label="Profile photo">
                 <Avatar profile={profile} size="xl" />
               </div>
-              <div><h3>{profile?.full_name || 'Your name'}</h3><p>@{profile?.username || 'username'}</p><button className="subtle-button" type="button" disabled={avatarBusy} onClick={() => avatarInput.current?.click()}>{avatarBusy ? 'Checking and uploading…' : 'Change photo'}</button><small className="profile-photo-guidance">Square JPG, PNG, or WebP · 640–1080 px</small></div>
-              <input ref={avatarInput} hidden type="file" accept="image/jpeg,image/png,image/webp" onChange={(event) => { uploadAvatar(event.target.files?.[0]); event.target.value = '' }} />
+              <div><h3>{profile?.full_name || 'Your name'}</h3><p>@{profile?.username || 'username'}</p><button className="subtle-button" type="button" disabled={avatarBusy} onClick={() => avatarInput.current?.click()}>{avatarBusy ? 'Checking and uploading…' : 'Change photo'}</button><small className="profile-photo-guidance">Crop JPG, PNG, or WebP to a square · 640–1080 px</small></div>
+              <input ref={avatarInput} hidden type="file" accept="image/jpeg,image/png,image/webp" onChange={(event) => { chooseAvatar(event.target.files?.[0]); event.target.value = '' }} />
             </div>
             <form className="settings-form profile-edit-form" onSubmit={saveProfile}>
               <label>Full name<input required value={profileForm.full_name} maxLength="80" onChange={(event) => setProfileForm({ ...profileForm, full_name: event.target.value })} /></label>
@@ -2123,13 +2321,21 @@ function SettingsModal({ profile, email, blockedUsers, onUnblock, onDeleteAccoun
         </div>
       </div>
     </section>
-  </div>
+    </div>
+    {avatarCropFile && <AvatarCropModal
+      file={avatarCropFile}
+      title="Adjust profile photo"
+      onCancel={() => setAvatarCropFile(null)}
+      onCrop={(croppedFile) => { setAvatarCropFile(null); void uploadAvatar(croppedFile) }}
+    />}
+  </>
 }
 
 function GroupModal({ friends, onClose, onCreate, busy }) {
   const [name, setName] = useState('')
   const [selected, setSelected] = useState([])
   const [photoFile, setPhotoFile] = useState(null)
+  const [photoCropFile, setPhotoCropFile] = useState(null)
   const [photoPreview, setPhotoPreview] = useState('')
   const [photoError, setPhotoError] = useState('')
   const photoInputRef = useRef(null)
@@ -2143,16 +2349,16 @@ function GroupModal({ friends, onClose, onCreate, busy }) {
 
   function choosePhoto(file) {
     setPhotoError('')
-    if (!file) { setPhotoFile(null); return }
-    if (!GROUP_IMAGE_EXTENSIONS[file.type] || file.size > 5 * 1024 * 1024) {
+    if (!file) { setPhotoFile(null); setPhotoCropFile(null); return }
+    if (!validateAvatarImage(file, setPhotoError)) {
       setPhotoFile(null)
-      setPhotoError('Choose a JPG, PNG, or WebP image smaller than 5 MB.')
       return
     }
-    setPhotoFile(file)
+    setPhotoCropFile(file)
   }
 
-  return <div className="modal-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose() }}><form className="group-modal" onSubmit={(event) => { event.preventDefault(); if (name.trim()) onCreate(name, selected, photoFile) }}>
+  return <>
+    <div className="modal-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose() }}><form className="group-modal" onSubmit={(event) => { event.preventDefault(); if (name.trim() && !photoCropFile && !photoError) onCreate(name, selected, photoFile) }}>
     <header className="modal-header"><div><span className="eyebrow">BRING YOUR PEOPLE TOGETHER</span><h2>Create a group</h2></div><button type="button" className="icon-button" onClick={onClose}><X size={19} /></button></header>
     <label>Group name<input required autoFocus value={name} onChange={(event) => setName(event.target.value)} placeholder="e.g. Weekend plans" maxLength="80" /></label>
     <div className="group-photo-picker">
@@ -2164,8 +2370,15 @@ function GroupModal({ friends, onClose, onCreate, busy }) {
     </div>
     <div className="group-friends-title">ADD FRIENDS <span>{selected.length} selected</span></div>
     <div className="group-friends-list">{friends.length ? friends.map((friend) => <label className="group-friend" key={friend.id}><Avatar profile={friend} /><span><strong>{friend.full_name}</strong><small>@{friend.username}</small></span><input type="checkbox" checked={selected.includes(friend.id)} onChange={(event) => setSelected(event.target.checked ? [...selected, friend.id] : selected.filter((id) => id !== friend.id))} /></label>) : <div className="group-no-friends">Add some friends before creating a group.</div>}</div>
-    <div className="modal-actions"><button type="button" className="subtle-button" onClick={onClose}>Cancel</button><button className="primary-button" disabled={!name.trim() || !selected.length || busy || Boolean(photoError)}>{busy ? 'Creating…' : 'Create group'}</button></div>
-  </form></div>
+    <div className="modal-actions"><button type="button" className="subtle-button" onClick={onClose}>Cancel</button><button className="primary-button" disabled={!name.trim() || !selected.length || busy || Boolean(photoError) || Boolean(photoCropFile)}>{busy ? 'Creating…' : 'Create group'}</button></div>
+    </form></div>
+    {photoCropFile && <AvatarCropModal
+      file={photoCropFile}
+      title="Adjust group avatar"
+      onCancel={() => setPhotoCropFile(null)}
+      onCrop={(croppedFile) => { setPhotoCropFile(null); setPhotoFile(croppedFile); setPhotoError('') }}
+    />}
+  </>
 }
 
 export default App
