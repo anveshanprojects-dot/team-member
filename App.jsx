@@ -212,6 +212,7 @@ function App() {
   const [friends, setFriends] = useState([])
   const [friendRequests, setFriendRequests] = useState([])
   const [friendRequestBusy, setFriendRequestBusy] = useState(null)
+  const [groupMemberBusy, setGroupMemberBusy] = useState(null)
   const [blockedUsers, setBlockedUsers] = useState([])
   const [notifications, setNotifications] = useState([])
   const [tab, setTab] = useState('chats')
@@ -301,6 +302,38 @@ function App() {
     chatUrl.hash = ''
     window.history.replaceState(null, '', `${chatUrl.pathname}${chatUrl.search}`)
     setShowSettings(false)
+  }
+
+  async function deleteNotification(notificationId) {
+    const { data, error } = await supabase.from('notifications').delete()
+      .eq('id', notificationId)
+      .eq('user_id', session.user.id)
+      .select('id')
+    if (error) {
+      notify(error.message)
+      return
+    }
+    if (!data?.length) {
+      notify('This notification is no longer available.')
+      return
+    }
+    notificationIdsRef.current.delete(notificationId)
+    setNotifications((current) => current.filter((item) => item.id !== notificationId))
+  }
+
+  async function clearNotifications() {
+    if (!notifications.length || !window.confirm('Delete all your notifications? This cannot be undone.')) return
+    const { data, error } = await supabase.from('notifications').delete()
+      .eq('user_id', session.user.id)
+      .select('id')
+    if (error) {
+      notify(error.message)
+      return
+    }
+    const deletedIds = new Set((data || []).map((item) => item.id))
+    deletedIds.forEach((id) => notificationIdsRef.current.delete(id))
+    setNotifications((current) => current.filter((item) => !deletedIds.has(item.id)))
+    notify(deletedIds.size ? 'Notifications deleted.' : 'There are no notifications to delete.')
   }
 
   const enableNotificationSound = useCallback(async () => {
@@ -991,9 +1024,15 @@ function App() {
   }
 
   async function addGroupMember(userId) {
+    if (!activeConversation?.is_group || activeConversation.members.find((member) => member.id === session.user.id)?.role !== 'admin') {
+      notify('Only group admins can add members.')
+      return
+    }
+    setGroupMemberBusy(userId)
     const { error } = await supabase.from('conversation_members').insert({ conversation_id: activeId, user_id: userId, role: 'member' })
     if (error) notify(error.message)
     else { notify('Member added.'); await loadWorkspace() }
+    setGroupMemberBusy(null)
   }
 
   async function removeGroupMember(userId) {
@@ -1348,7 +1387,7 @@ function App() {
           <button className={tab === 'chats' ? 'nav-item selected' : 'nav-item'} onClick={() => setTab('chats')}><MessageCircle size={18} />Messages{unreadTotal > 0 && <span className="nav-badge">{unreadTotal}</span>}</button>
           <button className={tab === 'contacts' ? 'nav-item selected' : 'nav-item'} onClick={() => setTab('contacts')}><UserRound size={18} />People<span className="nav-count">{friends.length}</span></button>
         </nav>
-        <div className="list-heading"><span>{tab === 'chats' ? 'CHATS' : tab === 'groups' ? 'GROUPS' : tab === 'contacts' ? 'PEOPLE' : tab === 'search' ? 'FIND TEAMMATES' : tab === 'notifications' ? 'RECENT ACTIVITY' : 'CHATS'}</span>{(tab === 'chats' || tab === 'groups') && <button className="icon-button small-icon" onClick={() => setShowGroup(true)} title="Create a group"><Plus size={17} /></button>}</div>
+        <div className="list-heading"><span>{tab === 'chats' ? 'CHATS' : tab === 'groups' ? 'GROUPS' : tab === 'contacts' ? 'PEOPLE' : tab === 'search' ? 'FIND TEAMMATES' : tab === 'notifications' ? 'RECENT ACTIVITY' : 'CHATS'}</span>{(tab === 'chats' || tab === 'groups') && <button className="icon-button small-icon" onClick={() => setShowGroup(true)} title="Create a group"><Plus size={17} /></button>}{tab === 'notifications' && notifications.length > 0 && <button className="icon-button small-icon notification-clear-button" onClick={clearNotifications} title="Delete all notifications" aria-label="Delete all notifications"><Trash2 size={15} /></button>}</div>
         <div className="sidebar-list">
           {tab === 'chats' && (filteredConversations.length ? <>
             {pinnedConversations.length > 0 && <section className="chat-list-section">
@@ -1418,7 +1457,7 @@ function App() {
               </div>
             </div>
           })}{!searching && userSearch && !searchResults.length && <div className="empty-sidebar"><strong>No one found</strong><span>Check the spelling or try their exact username or ID.</span></div>}<div className="search-hint"><Info size={14} />Search exact usernames or unique Chatter IDs.</div></>}
-          {tab === 'notifications' && (notifications.length ? notifications.map((notification) => <div className="activity-row" key={notification.id}><span className="activity-icon"><Bell size={15} /></span><span><strong>{notification.title || 'Chatter update'}</strong><small>{notification.body || notification.type}</small><small>{formatTime(notification.created_at)}</small></span></div>) : <div className="empty-sidebar"><div className="empty-icon"><Bell size={20} /></div><strong>Nothing new</strong><span>Your latest activity will appear here.</span></div>)}
+          {tab === 'notifications' && (notifications.length ? notifications.map((notification) => <div className="activity-row" key={notification.id}><span className="activity-icon"><Bell size={15} /></span><span><strong>{notification.title || 'Chatter update'}</strong><small>{notification.body || notification.type}</small><small>{formatTime(notification.created_at)}</small></span><button className="icon-button notification-delete-button" onClick={() => deleteNotification(notification.id)} title="Delete notification" aria-label={`Delete notification: ${notification.title || notification.type}`}><Trash2 size={15} /></button></div>) : <div className="empty-sidebar"><div className="empty-icon"><Bell size={20} /></div><strong>Nothing new</strong><span>Your latest activity will appear here.</span></div>)}
         </div>
         <footer className="sidebar-footer"><div className={`footer-status connection-${connectionStatus}`} role="status" aria-live="polite"><i />{connectionStatus === 'connected' ? 'Connected' : connectionStatus === 'disconnected' ? 'Reconnecting…' : 'Connecting…'}</div><button className="footer-help" onClick={() => notify('Tip: search for a username or Chatter ID to find friends.')}><CircleHelp size={15} /> Help & tips</button></footer>
       </aside>
@@ -1534,9 +1573,11 @@ function App() {
               <button className="text-button" onClick={() => removeGroupMember(member.id)}>Remove</button>
             </>}
           </div>)}
-          {activeConversation.members.find((item) => item.id === session.user.id)?.role === 'admin' && friends.filter((friend) => !activeConversation.members.some((member) => member.id === friend.id)).length > 0 && <div className="info-add-members">
-            {friends.filter((friend) => !activeConversation.members.some((member) => member.id === friend.id)).map((friend) => <button key={friend.id} className="text-button" onClick={() => addGroupMember(friend.id)}><Plus size={13} />Add {friend.full_name}</button>)}
-          </div>}
+          {activeConversation.members.find((item) => item.id === session.user.id)?.role === 'admin' && <GroupAddMembers
+            friends={friends.filter((friend) => !activeConversation.members.some((member) => member.id === friend.id))}
+            busyId={groupMemberBusy}
+            onAdd={addGroupMember}
+          />}
         </div>}
         {activeConversation.is_group
           ? <div className="info-meta group-admin-actions">
@@ -1665,6 +1706,35 @@ function FriendshipActions({ person, isFriend, request, currentUserId, busy, onS
   return <div className={`friendship-actions ${className}`}>
     <button className="primary-button" disabled={isBusy} onClick={() => onSend(person)}>{isBusy ? 'Sending…' : 'Add friend'}</button>
   </div>
+}
+
+function GroupAddMembers({ friends, busyId, onAdd }) {
+  const [query, setQuery] = useState('')
+  const availableFriends = friends.filter((friend) =>
+    `${friend.full_name} ${friend.username}`.toLowerCase().includes(query.trim().toLowerCase())
+  )
+
+  return <section className="group-add-members" aria-labelledby="group-add-members-title">
+    <div className="group-add-members-heading">
+      <h4 id="group-add-members-title">ADD MEMBERS</h4>
+      <span>{friends.length} available</span>
+    </div>
+    {friends.length ? <>
+      <label className="group-member-search">
+        <Search size={14} />
+        <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Find a friend" aria-label="Find a friend to add" />
+      </label>
+      <div className="group-member-candidates">
+        {availableFriends.length ? availableFriends.map((friend) => <div className="group-member-candidate" key={friend.id}>
+          <Avatar profile={friend} size="small" online={friend.is_online} />
+          <span><strong>{friend.full_name}</strong><small>@{friend.username}</small></span>
+          <button type="button" className="subtle-button" disabled={Boolean(busyId)} onClick={() => onAdd(friend.id)}>
+            <Plus size={13} />{busyId === friend.id ? 'Adding…' : 'Add'}
+          </button>
+        </div>) : <p className="group-member-empty">No friends match that search.</p>}
+      </div>
+    </> : <p className="group-member-empty">All your friends are already in this group.</p>}
+  </section>
 }
 
 function SettingsModal({ profile, email, blockedUsers, onUnblock, onDeleteAccount, onClose, onSignOut, onSave, theme, setTheme, notify, notificationsEnabled, setNotificationsEnabled, notificationSoundEnabled, setNotificationSoundEnabled, enableNotificationSound, standalone = false }) {
