@@ -583,6 +583,7 @@ html[data-theme=dark] .account-danger-zone { background: #302321; border-color: 
 
 @media (max-width: 700px) {
   html, body, #root { width: 100%; min-width: 320px; min-height: 100%; }
+  html, body { overscroll-behavior-y: none; }
   body { min-height: 100dvh; overflow: hidden; }
   .app-shell { width: 100%; height: 100dvh; min-height: 0; overflow: hidden; }
   .sidebar { inset: 0 0 calc(60px + env(safe-area-inset-bottom)); width: 100%; }
@@ -1046,8 +1047,6 @@ html[data-theme=dark] .voice-send-button, html[data-theme=dark] .voice-send-butt
 .group-photo-error { flex-basis: 100%; color: #b94e47 !important; }
 .pull-refresh-indicator { position: sticky; top: 8px; z-index: 6; width: max-content; max-width: 100%; height: 0; display: flex; align-items: center; justify-content: center; gap: 7px; overflow: hidden; margin: 0 auto; padding: 0 12px; color: var(--muted); border: 1px solid var(--line); border-radius: 18px; background: var(--paper); box-shadow: 0 3px 12px rgba(0, 31, 63, .08); opacity: 0; transform: translateY(-42px); transition: height .16s ease, margin .16s ease, opacity .16s ease, transform .16s ease; pointer-events: none; font-size: 10px; }
 .pull-refresh-visible { height: 32px; margin-bottom: 8px; opacity: 1; transform: translateY(0); }
-.pull-refresh-active svg { animation: pull-refresh-spin .8s linear infinite; }
-@keyframes pull-refresh-spin { to { transform: rotate(360deg); } }
 @media (min-width: 701px) { .pull-refresh-indicator { display: none; } }
 .notification-delete-button { flex: 0 0 auto; align-self: center; opacity: .65; }
 .notification-delete-button:hover { color: #b94e47; background: #fff0ef; }

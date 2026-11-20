@@ -23,7 +23,7 @@ A responsive real-time messaging application built with React, Vite, Supabase Au
 - Chat history shows an unread divider and message loading skeletons; connection status reflects the Realtime channel state.
 - Messages appear optimistically while sending. Realtime refreshes only changed messages, with a five-second active-chat sync as a fallback if a Realtime event is missed.
 - Responsive desktop and mobile layouts.
-- On mobile, pull down at the top of the chat list or message history to refresh workspace data and the active conversation.
+- On mobile, pull down past the indicator at the top of the chat list or message history and release to reload the entire website.
 
 ## Requirements
 

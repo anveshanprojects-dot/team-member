@@ -250,8 +250,6 @@ function App() {
   const [showGroup, setShowGroup] = useState(false)
   const [showMobileMenu, setShowMobileMenu] = useState(false)
   const [pullRefreshProgress, setPullRefreshProgress] = useState(0)
-  const [pullRefreshing, setPullRefreshing] = useState(false)
-  const [manualRefreshKey, setManualRefreshKey] = useState(0)
   const [toast, setToast] = useState('')
   const [busy, setBusy] = useState(false)
   const [notificationsEnabled, setNotificationsEnabled] = useState(localStorage.getItem('chatter-notifications') === 'true')
@@ -784,7 +782,7 @@ function App() {
         window.setTimeout(() => setTypingUsers((current) => ({ ...current, [payload.userId]: false })), 2500)
       }).subscribe()
     return () => { alive = false; window.clearTimeout(refreshTimer); window.clearInterval(syncTimer); supabase.removeChannel(channel); if (typingChannel.current) supabase.removeChannel(typingChannel.current) }
-  }, [activeId, session, notify, manualRefreshKey])
+  }, [activeId, session, notify])
 
   useEffect(() => {
     if (!activeMember?.id || activeConversation?.is_group) { setActiveStatus(null); return }
@@ -1491,35 +1489,37 @@ function App() {
   }
 
   function handlePullTouchStart(event) {
-    if (!window.matchMedia('(max-width: 700px)').matches || pullRefreshing || event.currentTarget.scrollTop > 0) return
+    if (!window.matchMedia('(max-width: 700px)').matches || event.currentTarget.scrollTop > 0) return
     const touch = event.touches[0]
     if (touch) pullGestureRef.current = { startY: touch.clientY, target: event.currentTarget, progress: 0 }
   }
 
   function handlePullTouchMove(event) {
     const gesture = pullGestureRef.current
-    if (!gesture || gesture.target !== event.currentTarget || event.currentTarget.scrollTop > 0) return
+    if (!gesture || gesture.target !== event.currentTarget) return
+    if (event.currentTarget.scrollTop > 0) {
+      cancelPullGesture()
+      return
+    }
     const touch = event.touches[0]
     if (!touch) return
     const delta = touch.clientY - gesture.startY
+    if (delta <= 0) {
+      cancelPullGesture()
+      return
+    }
     const progress = Math.min(1, Math.max(0, delta / 72))
     gesture.progress = progress
     setPullRefreshProgress(Math.round(progress * 10) / 10)
   }
 
-  async function handlePullTouchEnd(event) {
+  function handlePullTouchEnd(event) {
     const gesture = pullGestureRef.current
     if (!gesture || gesture.target !== event.currentTarget) return
     pullGestureRef.current = null
     setPullRefreshProgress(0)
-    if (gesture.progress < 1 || pullRefreshing) return
-    setPullRefreshing(true)
-    try {
-      await loadWorkspace()
-      setManualRefreshKey((current) => current + 1)
-    } finally {
-      setPullRefreshing(false)
-    }
+    if (gesture.progress < 1 || event.currentTarget.scrollTop > 0) return
+    window.location.reload()
   }
 
   function cancelPullGesture() {
@@ -1528,9 +1528,9 @@ function App() {
   }
 
   function renderPullRefreshIndicator() {
-    const visible = pullRefreshing || pullRefreshProgress > 0
-    const label = pullRefreshing ? 'Refreshing…' : pullRefreshProgress >= 1 ? 'Release to refresh' : 'Pull to refresh'
-    return <div className={`pull-refresh-indicator ${visible ? 'pull-refresh-visible' : ''} ${pullRefreshing ? 'pull-refresh-active' : ''}`} role="status" aria-live="polite">
+    const visible = pullRefreshProgress > 0
+    const label = pullRefreshProgress >= 1 ? 'Release to reload' : 'Pull to reload'
+    return <div className={`pull-refresh-indicator ${visible ? 'pull-refresh-visible' : ''}`} role="status" aria-live="polite">
       <RefreshCw size={14} style={{ transform: `rotate(${pullRefreshProgress * 180}deg)` }} />
       <span>{label}</span>
     </div>
@@ -1713,7 +1713,7 @@ function App() {
                   <input ref={fileRef} hidden type="file" onChange={(event) => { uploadFile(event.target.files?.[0]); event.target.value = '' }} />
                   <button type="button" className={`composer-icon ${showAttach ? 'composer-active' : ''}`} onClick={() => { setShowAttach(!showAttach); setShowEmoji(false) }} title="Attach file"><Paperclip size={19} /></button>
                   <div className="composer-input"><input value={draft} onChange={(event) => { setDraft(event.target.value); startTyping() }} placeholder="Write a message..." aria-label="Write a message" /><button type="button" className="composer-icon emoji-button" onClick={() => { setShowEmoji(!showEmoji); setShowAttach(false) }} title="Add emoji"><Smile size={19} /></button></div>
-                  {!draft.trim() && <button type="button" className="composer-icon voice-button" onClick={toggleVoiceRecording} title="Record voice message" aria-label="Record voice message"><Mic size={18} /></button>}
+                  <button type="button" className="composer-icon voice-button" onClick={toggleVoiceRecording} title="Record voice message" aria-label="Record voice message"><Mic size={18} /></button>
                   <button className="send-button" disabled={!draft.trim() || busy} aria-label="Send message"><Send size={18} /></button>
                 </>}
           </form>
