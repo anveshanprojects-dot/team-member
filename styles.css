@@ -125,7 +125,9 @@ button:focus-visible, input:focus-visible, textarea:focus-visible { outline: 3px
 .message-line { position: relative; display: flex; align-items: flex-end; gap: 8px; margin: 12px 0; }
 .message-line.message-grouped { margin-top: -6px; }
 .message-own { justify-content: flex-end; }
-.avatar-spacer { width: 27px; flex: 0 0 27px; }
+.avatar-spacer { width: 30px; flex: 0 0 30px; }
+.message-avatar { width: 30px; height: 30px; flex: 0 0 30px; overflow: hidden; border: 2px solid var(--paper); border-radius: 50%; box-shadow: 0 1px 5px rgba(0, 31, 63, .16); }
+.message-avatar img { display: block; width: 100%; height: 100%; border-radius: 50%; object-fit: cover; }
 .message-content-wrap { position: relative; max-width: min(72%, 490px); display: flex; flex-direction: column; align-items: flex-start; }
 .message-own .message-content-wrap { align-items: flex-end; }
 .message-sender { margin: 0 0 4px 4px; color: #76847f; font-size: 9px; font-weight: 700; }

@@ -54,9 +54,9 @@ function formatDuration(seconds) {
   return `${Math.floor(seconds / 60).toString().padStart(2, '0')}:${(seconds % 60).toString().padStart(2, '0')}`
 }
 
-function Avatar({ profile, size = 'normal', online = false }) {
+function Avatar({ profile, size = 'normal', online = false, className = '' }) {
   return (
-    <span className={`avatar avatar-${size}`}>
+    <span className={`avatar avatar-${size} ${className}`.trim()}>
       {profile?.avatar_url
         ? <img src={profile.avatar_url} alt="" />
         : <span>{initials(profile?.full_name || profile?.username || 'U')}</span>}
@@ -1676,7 +1676,7 @@ function App() {
               return <React.Fragment key={message.id}>
                 {message.id === firstUnreadMessageId && <div className="unread-message-divider"><span>Unread messages</span></div>}
                 <div className={`message-line ${own ? 'message-own' : ''} ${grouped ? 'message-grouped' : ''}`} id={`message-${message.id}`}>
-                {!own && !grouped && <Avatar profile={message.profiles} size="tiny" />}
+                {!own && !grouped && <Avatar profile={message.profiles} size="tiny" className="message-avatar" />}
                 {!own && grouped && <span className="avatar-spacer" />}
                 <div className="message-content-wrap">
                   {!own && !grouped && <span className="message-sender">{message.profiles?.full_name || 'Member'}</span>}
